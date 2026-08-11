@@ -7,6 +7,51 @@
 
 ---
 
+# Implementation Status
+
+**Current checkpoint:** Checkpoint 1 — Source Locations, Tokens, Lexer
+**Status:** Complete
+
+## Completed
+
+- Checkpoint 0 repository bootstrap and `kaj` CLI version output.
+- Immutable, half-open `SourceLocation` and `SourceSpan` value models.
+- Structured lexical diagnostics with all five Checkpoint 1 diagnostic codes.
+- Complete Checkpoint 1 token kinds, token values, and public lexer API.
+- ASCII identifiers, exact case-sensitive keyword recognition, integers, exact decimals,
+  strings and escapes, punctuation, operators, whitespace, and comments.
+- Recoverable lexical errors and exactly one zero-width EOF token per tokenization.
+- Conformance coverage for token meaning, source spans, recovery, and acceptance examples.
+
+## Decisions Made During Checkpoint 1
+
+- `\n`, `\r`, and `\r\n` are accepted as line endings. A CRLF pair is one logical line break
+  while advancing the source offset by two characters.
+- Tabs advance the source column by one, as required by the lexical specification.
+- Malformed forms `.5`, `1.`, and `1.2.3` are consumed as one invalid numeric sequence,
+  produce one `LEX_INVALID_NUMBER`, and do not emit misleading partial number tokens.
+- An unknown string escape produces `LEX_INVALID_ESCAPE`, drops the escape backslash from
+  the decoded value, preserves the escaped character, and continues scanning the string.
+- Raw newlines terminate ordinary strings without consuming the newline, allowing normal
+  whitespace handling and token recovery to continue on the next line.
+- Block comments are non-nesting: the first `*/` closes the active comment.
+- Reusing a `Lexer` instance restarts tokenization, so every result contains exactly one EOF.
+
+## Known Issues
+
+- None within the Checkpoint 1 scope.
+- Parser, AST, semantic analysis, and deferred lexical forms remain intentionally unimplemented.
+
+## Verification
+
+- `pytest`: 97 tests passed.
+- `ruff check .`: passed.
+- `mypy src`: passed under strict mode.
+- `kaj --version`: prints `Kaj 0.0.1`.
+- `python -m kaj`: prints `Kaj 0.0.1`.
+
+---
+
 # 1. Goal
 
 This document defines the first implementation pass of Kaj.
