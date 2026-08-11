@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 1 — Source Locations, Tokens, Lexer
+**Current checkpoint:** Checkpoint 2 — Core AST
 **Status:** Complete
 
 ## Completed
@@ -22,6 +22,12 @@
   strings and escapes, punctuation, operators, whitespace, and comments.
 - Recoverable lexical errors and exactly one zero-width EOF token per tokenization.
 - Conformance coverage for token meaning, source spans, recovery, and acceptance examples.
+- Immutable AST base categories for programs, expressions, statements, and type expressions.
+- Core literal, operator, call, access, collection, binding, assignment, control-flow, and
+  function AST nodes required by Checkpoint 2.
+- Syntactic named and recursively nested generic type expressions.
+- Direct-construction AST tests covering spans, immutability, structural equality, tuple
+  ordering, operator inventories, parameter mutability, and representative tree shapes.
 
 ## Decisions Made During Checkpoint 1
 
@@ -37,16 +43,32 @@
 - Block comments are non-nesting: the first `*/` closes the active comment.
 - Reusing a `Lexer` instance restarts tokenization, so every result contains exactly one EOF.
 
+## Decisions Made During Checkpoint 2
+
+- `Node`, `Expression`, `Statement`, and `TypeExpression` are frozen dataclass base categories;
+  all concrete nodes inherit the required `SourceSpan` field.
+- Declarations are statements, allowing `FunctionDeclaration` in `Program` and `Block`
+  statement tuples without a parallel declaration collection.
+- `CallArgument`, `MapEntry`, and `Parameter` are source-derived `Node` values and therefore
+  carry their own spans.
+- Ordered AST children use tuples throughout.
+- `BindingKind`, `UnaryOperator`, `BinaryOperator`, and `AssignmentOperator` are semantic AST
+  enums independent of lexer `TokenKind`.
+- `IfStatement.else_branch` accepts a `Block`, another `IfStatement`, or `None` to preserve
+  ordinary `else` and `else if` syntax without parser-specific nodes.
+- Assignment targets remain expressions; assignability is deferred to semantic analysis.
+
 ## Known Issues
 
 - None within the Checkpoint 1 scope.
-- Parser, AST, semantic analysis, and deferred lexical forms remain intentionally unimplemented.
+- Parser, AST JSON, semantic analysis, runtime behavior, and deferred language nodes remain
+  intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 97 tests passed.
+- `pytest`: 120 tests passed.
 - `ruff check .`: passed.
-- `mypy src`: passed under strict mode.
+- `mypy src`: passed under strict mode for 15 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.
 - `python -m kaj`: prints `Kaj 0.0.1`.
 
