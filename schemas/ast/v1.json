@@ -1,0 +1,521 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kaj-lang.org/schemas/ast/v1.json",
+  "title": "Kaj AST JSON v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "program"],
+  "properties": {
+    "format": { "const": "kaj-ast" },
+    "version": { "const": 1 },
+    "program": { "$ref": "#/$defs/program" }
+  },
+  "$defs": {
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "line", "column"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0 },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/$defs/location" },
+        "end": { "$ref": "#/$defs/location" }
+      }
+    },
+    "nodeBase": {
+      "type": "object",
+      "required": ["kind", "span"],
+      "properties": {
+        "kind": { "type": "string" },
+        "span": { "$ref": "#/$defs/span" }
+      }
+    },
+    "expression": {
+      "oneOf": [
+        { "$ref": "#/$defs/integerLiteral" },
+        { "$ref": "#/$defs/decimalLiteral" },
+        { "$ref": "#/$defs/stringLiteral" },
+        { "$ref": "#/$defs/booleanLiteral" },
+        { "$ref": "#/$defs/noneLiteral" },
+        { "$ref": "#/$defs/identifier" },
+        { "$ref": "#/$defs/unaryExpression" },
+        { "$ref": "#/$defs/binaryExpression" },
+        { "$ref": "#/$defs/callExpression" },
+        { "$ref": "#/$defs/memberAccessExpression" },
+        { "$ref": "#/$defs/indexExpression" },
+        { "$ref": "#/$defs/listLiteral" },
+        { "$ref": "#/$defs/mapLiteral" }
+      ]
+    },
+    "typeExpression": {
+      "oneOf": [
+        { "$ref": "#/$defs/namedType" },
+        { "$ref": "#/$defs/genericType" }
+      ]
+    },
+    "statement": {
+      "oneOf": [
+        { "$ref": "#/$defs/block" },
+        { "$ref": "#/$defs/bindingDeclaration" },
+        { "$ref": "#/$defs/assignmentStatement" },
+        { "$ref": "#/$defs/expressionStatement" },
+        { "$ref": "#/$defs/ifStatement" },
+        { "$ref": "#/$defs/whileStatement" },
+        { "$ref": "#/$defs/forStatement" },
+        { "$ref": "#/$defs/breakStatement" },
+        { "$ref": "#/$defs/continueStatement" },
+        { "$ref": "#/$defs/returnStatement" },
+        { "$ref": "#/$defs/functionDeclaration" }
+      ]
+    },
+    "program": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["statements"],
+          "properties": {
+            "kind": { "const": "program" },
+            "statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "integerLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "kind": { "const": "integer_literal" },
+            "value": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "decimalLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "kind": { "const": "decimal_literal" },
+            "value": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "stringLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "kind": { "const": "string_literal" },
+            "value": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "booleanLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "kind": { "const": "boolean_literal" },
+            "value": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "noneLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "properties": { "kind": { "const": "none_literal" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "identifier": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "kind": { "const": "identifier" },
+            "name": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "unaryExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["operator", "operand"],
+          "properties": {
+            "kind": { "const": "unary_expression" },
+            "operator": { "enum": ["positive", "negate", "not"] },
+            "operand": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "binaryExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["operator", "left", "right"],
+          "properties": {
+            "kind": { "const": "binary_expression" },
+            "operator": {
+              "enum": [
+                "add", "subtract", "multiply", "divide", "modulo", "power",
+                "equal", "not_equal", "less", "less_equal", "greater", "greater_equal",
+                "and", "or"
+              ]
+            },
+            "left": { "$ref": "#/$defs/expression" },
+            "right": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "callArgument": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "value"],
+          "properties": {
+            "kind": { "const": "call_argument" },
+            "name": { "type": ["string", "null"] },
+            "value": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "callExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["callee", "arguments"],
+          "properties": {
+            "kind": { "const": "call_expression" },
+            "callee": { "$ref": "#/$defs/expression" },
+            "arguments": { "type": "array", "items": { "$ref": "#/$defs/callArgument" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "memberAccessExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["object", "member"],
+          "properties": {
+            "kind": { "const": "member_access_expression" },
+            "object": { "$ref": "#/$defs/expression" },
+            "member": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "indexExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["object", "index"],
+          "properties": {
+            "kind": { "const": "index_expression" },
+            "object": { "$ref": "#/$defs/expression" },
+            "index": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "listLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["elements"],
+          "properties": {
+            "kind": { "const": "list_literal" },
+            "elements": { "type": "array", "items": { "$ref": "#/$defs/expression" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "mapEntry": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["key", "value"],
+          "properties": {
+            "kind": { "const": "map_entry" },
+            "key": { "$ref": "#/$defs/expression" },
+            "value": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "mapLiteral": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["entries"],
+          "properties": {
+            "kind": { "const": "map_literal" },
+            "entries": { "type": "array", "items": { "$ref": "#/$defs/mapEntry" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "namedType": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "kind": { "const": "named_type" },
+            "name": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "genericType": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["base", "arguments"],
+          "properties": {
+            "kind": { "const": "generic_type" },
+            "base": { "$ref": "#/$defs/namedType" },
+            "arguments": { "type": "array", "items": { "$ref": "#/$defs/typeExpression" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "block": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["statements"],
+          "properties": {
+            "kind": { "const": "block" },
+            "statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "bindingDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["binding_kind", "name", "annotation", "initializer"],
+          "properties": {
+            "kind": { "const": "binding_declaration" },
+            "binding_kind": { "enum": ["let", "var"] },
+            "name": { "type": "string" },
+            "annotation": {
+              "oneOf": [{ "$ref": "#/$defs/typeExpression" }, { "type": "null" }]
+            },
+            "initializer": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "assignmentStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["operator", "target", "value"],
+          "properties": {
+            "kind": { "const": "assignment_statement" },
+            "operator": {
+              "enum": ["assign", "add_assign", "subtract_assign", "multiply_assign", "divide_assign"]
+            },
+            "target": { "$ref": "#/$defs/expression" },
+            "value": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "expressionStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["expression"],
+          "properties": {
+            "kind": { "const": "expression_statement" },
+            "expression": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ifStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["condition", "then_branch", "else_branch"],
+          "properties": {
+            "kind": { "const": "if_statement" },
+            "condition": { "$ref": "#/$defs/expression" },
+            "then_branch": { "$ref": "#/$defs/block" },
+            "else_branch": {
+              "oneOf": [
+                { "$ref": "#/$defs/block" },
+                { "$ref": "#/$defs/ifStatement" },
+                { "type": "null" }
+              ]
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "whileStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["condition", "body"],
+          "properties": {
+            "kind": { "const": "while_statement" },
+            "condition": { "$ref": "#/$defs/expression" },
+            "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "forStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "iterable", "body"],
+          "properties": {
+            "kind": { "const": "for_statement" },
+            "name": { "type": "string" },
+            "iterable": { "$ref": "#/$defs/expression" },
+            "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "breakStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "properties": { "kind": { "const": "break_statement" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "continueStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "properties": { "kind": { "const": "continue_statement" } } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "kind": { "const": "return_statement" },
+            "value": {
+              "oneOf": [{ "$ref": "#/$defs/expression" }, { "type": "null" }]
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "parameter": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "type_annotation", "mutable"],
+          "properties": {
+            "kind": { "const": "parameter" },
+            "name": { "type": "string" },
+            "type_annotation": { "$ref": "#/$defs/typeExpression" },
+            "mutable": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "functionDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "parameters", "return_type", "body"],
+          "properties": {
+            "kind": { "const": "function_declaration" },
+            "name": { "type": "string" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+            "return_type": { "$ref": "#/$defs/typeExpression" },
+            "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

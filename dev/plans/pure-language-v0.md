@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 3 — Minimal Parser
+**Current checkpoint:** Checkpoint 4 — AST JSON
 **Status:** Complete
 
 ## Completed
@@ -34,6 +34,12 @@
 - Statement-level recovery that preserves later recognizable statements after malformed input.
 - Parser conformance coverage for precedence, associativity, spans, diagnostics, recovery, and
   realistic multi-statement programs.
+- Canonical AST JSON v1 serialization and strict deserialization for every Core AST node.
+- A versioned `kaj-ast` document envelope with deterministic, Unicode-readable JSON output.
+- Exact string encoding for arbitrary-precision integers and `Decimal` literals.
+- Structured AST JSON errors with stable codes and JSON field paths.
+- A Draft 2020-12 schema at `schemas/ast/v1.json` covering the complete v1 document contract.
+- Direct and parser-driven round-trip, invalid-input, span, numeric, Unicode, and schema tests.
 
 ## Decisions Made During Checkpoint 1
 
@@ -82,17 +88,36 @@
   always advances when necessary to prevent malformed input from stalling.
 - Parser diagnostics remain separate from lexer diagnostics; frontend orchestration is deferred.
 
+## AST JSON v1 Decisions
+
+- The external document is exactly `{ "format": "kaj-ast", "version": 1, "program": ... }`;
+  unknown fields are rejected at the envelope and every node level.
+- All 29 concrete Core AST node kinds use explicit stable snake_case discriminators and explicit
+  enum mappings independent of Python class and enum names.
+- `CallArgument`, `MapEntry`, and `Parameter` include spans because the authoritative internal
+  AST defines them as source-derived nodes.
+- Integer and decimal literal values are canonical strings. Deserialization performs no numeric
+  coercion through JSON numbers or binary floating point.
+- Child positions validate their AST category before construction; structurally valid but
+  semantically invalid Kaj remains available to later compiler passes.
+- Invalid external input raises `ASTJSONError` with one of the frozen v1 error codes and a stable
+  `$`-rooted path rather than fabricating Kaj source spans.
+- Serialization uses an explicit allowlist and never performs dynamic class loading or execution.
+- Schema validation is a development/conformance gate, not a runtime cost on normal compiler use.
+- The internal AST specification now lives at its consistently referenced canonical path,
+  `docs/internals/ast.md`.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–3 scope.
-- AST JSON, name resolution, type checking, runtime behavior, formatting, and deferred language
-  nodes remain intentionally unimplemented.
+- None within the completed Checkpoint 0–4 scope.
+- Name resolution, type checking, runtime behavior, formatting, AST patches, compiler IR, and
+  deferred language nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 195 tests passed.
+- `pytest`: 248 tests passed.
 - `ruff check .`: passed.
-- `mypy src`: passed under strict mode for 17 source files.
+- `mypy src`: passed under strict mode for 19 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.
 - `python -m kaj`: prints `Kaj 0.0.1`.
 
