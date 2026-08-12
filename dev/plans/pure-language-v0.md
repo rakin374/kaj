@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 2 — Core AST
+**Current checkpoint:** Checkpoint 3 — Minimal Parser
 **Status:** Complete
 
 ## Completed
@@ -28,6 +28,12 @@
 - Syntactic named and recursively nested generic type expressions.
 - Direct-construction AST tests covering spans, immutability, structural equality, tuple
   ordering, operator inventories, parameter mutability, and representative tree shapes.
+- A reusable token-stream `Parser` API returning a `Program` and structured diagnostics.
+- Minimal pure-language parsing for expressions, postfix chains, collections, types, bindings,
+  assignments, blocks, control flow, returns, parameters, and function declarations.
+- Statement-level recovery that preserves later recognizable statements after malformed input.
+- Parser conformance coverage for precedence, associativity, spans, diagnostics, recovery, and
+  realistic multi-statement programs.
 
 ## Decisions Made During Checkpoint 1
 
@@ -58,17 +64,35 @@
   ordinary `else` and `else if` syntax without parser-specific nodes.
 - Assignment targets remain expressions; assignability is deferred to semantic analysis.
 
+## Decisions Made During Checkpoint 3
+
+- Expression parsing uses recursive-descent precedence layers. Power is right-associative and
+  binds more tightly than unary operators, so `-2 ** 2` becomes `-(2 ** 2)`.
+- Parenthesized expressions reuse the existing expression node with a span expanded to include
+  the parentheses; no unsupported grouping node was added.
+- Postfix calls, member access, and indexing are applied left-to-right after primary parsing and
+  bind more tightly than power and ordinary operators.
+- Assignment remains statement-only. Invalid target shapes produce
+  `PARSE_INVALID_ASSIGNMENT_TARGET` while retaining a recoverable assignment tree.
+- Call arguments are diagnosed when a positional argument follows a named argument, but the
+  parser preserves all arguments for later compiler reporting.
+- Type parsing interprets lexer `<` and `>` tokens as generic delimiters only in type context.
+- Bare `return` is recognized only before `}` or EOF, matching the newline-independent grammar.
+- Statement recovery synchronizes at recognized statement-leading keywords, `}`, or EOF and
+  always advances when necessary to prevent malformed input from stalling.
+- Parser diagnostics remain separate from lexer diagnostics; frontend orchestration is deferred.
+
 ## Known Issues
 
-- None within the Checkpoint 1 scope.
-- Parser, AST JSON, semantic analysis, runtime behavior, and deferred language nodes remain
-  intentionally unimplemented.
+- None within the completed Checkpoint 0–3 scope.
+- AST JSON, name resolution, type checking, runtime behavior, formatting, and deferred language
+  nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 120 tests passed.
+- `pytest`: 195 tests passed.
 - `ruff check .`: passed.
-- `mypy src`: passed under strict mode for 15 source files.
+- `mypy src`: passed under strict mode for 17 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.
 - `python -m kaj`: prints `Kaj 0.0.1`.
 
