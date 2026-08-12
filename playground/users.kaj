@@ -1,0 +1,37 @@
+newtype UserId = String
+
+enum Status {
+    active
+    suspended(reason: String)
+}
+
+type User {
+    id: UserId
+    name: String
+    status: Status
+}
+
+fn describe(user: User) -> String {
+    match user.status {
+        active => return user.name
+        suspended(reason) => return reason
+    }
+}
+
+let users: Map<UserId, User> = {
+    UserId("001"): User {id: UserId("001"), name: "Alice", status: Status.active},
+    UserId("002"): User {
+        id: UserId("002"),
+        name: "Bob",
+        status: Status.suspended(reason: "account review"),
+    },
+}
+match users[UserId("001")] {
+    some(user) => print(describe(user))
+    none => print("User not found")
+}
+match users[UserId("999")] {
+    some(user) => print(describe(user))
+    none => print("User not found")
+}
+print(users.count)
