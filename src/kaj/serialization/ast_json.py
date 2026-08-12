@@ -38,6 +38,10 @@ from kaj.ast import (
     NoneLiteral,
     Parameter,
     Program,
+    RecordConstructionExpression,
+    RecordDeclaration,
+    RecordFieldDeclaration,
+    RecordFieldInitializer,
     ReturnStatement,
     Statement,
     StringLiteral,
@@ -268,6 +272,21 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
             {"entries": [_encode_node(entry) for entry in node.entries]},
             span,
         )
+    if isinstance(node, RecordFieldInitializer):
+        return _node(
+            "record_field_initializer",
+            {"name": node.name, "value": _encode_node(node.value)},
+            span,
+        )
+    if isinstance(node, RecordConstructionExpression):
+        return _node(
+            "record_construction_expression",
+            {
+                "type_name": node.type_name,
+                "fields": [_encode_node(field) for field in node.fields],
+            },
+            span,
+        )
     if isinstance(node, NamedType):
         return _node("named_type", {"name": node.name}, span)
     if isinstance(node, GenericType):
@@ -361,6 +380,18 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
                 "return_type": _encode_node(node.return_type),
                 "body": _encode_node(node.body),
             },
+            span,
+        )
+    if isinstance(node, RecordFieldDeclaration):
+        return _node(
+            "record_field_declaration",
+            {"name": node.name, "type_annotation": _encode_node(node.type_annotation)},
+            span,
+        )
+    if isinstance(node, RecordDeclaration):
+        return _node(
+            "record_declaration",
+            {"name": node.name, "fields": [_encode_node(field) for field in node.fields]},
             span,
         )
     raise ASTJSONError(
@@ -544,6 +575,25 @@ def _decode_map(obj: dict[str, object], path: JSONPath) -> Node:
     return MapLiteral(span=_span_field(obj, path), entries=tuple(entries))
 
 
+def _decode_record_field_initializer(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "value"}, path)
+    return RecordFieldInitializer(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        value=_expression_field(obj, "value", path),
+    )
+
+
+def _decode_record_construction(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"type_name", "fields"}, path)
+    fields = _node_list(obj, "fields", path, _expect_record_field_initializer)
+    return RecordConstructionExpression(
+        span=_span_field(obj, path),
+        type_name=_string_field(obj, "type_name", path),
+        fields=tuple(fields),
+    )
+
+
 def _decode_named_type(obj: dict[str, object], path: JSONPath) -> Node:
     _check_node_fields(obj, {"name"}, path)
     return NamedType(span=_span_field(obj, path), name=_string_field(obj, "name", path))
@@ -703,6 +753,29 @@ def _decode_function(obj: dict[str, object], path: JSONPath) -> Node:
     )
 
 
+def _decode_record_field_declaration(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "type_annotation"}, path)
+    annotation = _expect_type_expression(
+        _decode_node(_required(obj, "type_annotation", path), path + ("type_annotation",)),
+        path + ("type_annotation",),
+    )
+    return RecordFieldDeclaration(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        type_annotation=annotation,
+    )
+
+
+def _decode_record_declaration(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "fields"}, path)
+    fields = _node_list(obj, "fields", path, _expect_record_field_declaration)
+    return RecordDeclaration(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        fields=tuple(fields),
+    )
+
+
 type NodeDecoder = Callable[[dict[str, object], JSONPath], Node]
 _NODE_DECODERS: dict[str, NodeDecoder] = {
     "program": _decode_program,
@@ -721,6 +794,8 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "list_literal": _decode_list,
     "map_entry": _decode_map_entry,
     "map_literal": _decode_map,
+    "record_field_initializer": _decode_record_field_initializer,
+    "record_construction_expression": _decode_record_construction,
     "named_type": _decode_named_type,
     "generic_type": _decode_generic_type,
     "block": _decode_block,
@@ -735,6 +810,8 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "return_statement": _decode_return,
     "parameter": _decode_parameter,
     "function_declaration": _decode_function,
+    "record_field_declaration": _decode_record_field_declaration,
+    "record_declaration": _decode_record_declaration,
 }
 
 
@@ -874,6 +951,26 @@ def _expect_call_argument(node: Node, path: JSONPath) -> CallArgument:
 def _expect_map_entry(node: Node, path: JSONPath) -> MapEntry:
     if not isinstance(node, MapEntry):
         raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected a map_entry node.", path)
+    return node
+
+
+def _expect_record_field_initializer(
+    node: Node, path: JSONPath
+) -> RecordFieldInitializer:
+    if not isinstance(node, RecordFieldInitializer):
+        raise ASTJSONError(
+            ASTJSON_INVALID_FIELD, "Expected a record_field_initializer node.", path
+        )
+    return node
+
+
+def _expect_record_field_declaration(
+    node: Node, path: JSONPath
+) -> RecordFieldDeclaration:
+    if not isinstance(node, RecordFieldDeclaration):
+        raise ASTJSONError(
+            ASTJSON_INVALID_FIELD, "Expected a record_field_declaration node.", path
+        )
     return node
 
 

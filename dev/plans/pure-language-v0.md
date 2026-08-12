@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 9 — Lists
+**Current checkpoint:** Checkpoint 10 — Records
 **Status:** Complete
 
 ## Completed
@@ -90,6 +90,16 @@
   explicit member dispatch, deterministic iteration order, and fresh per-iteration environments.
 - List conformance coverage for nested lists, annotations, functions, rebinding, scope identity,
   iteration, runtime promotion, and structured bounds errors.
+- Immutable record declaration, field declaration, construction, and initializer AST nodes with
+  parser disambiguation from blocks and map literals.
+- Strict AST JSON v1 serialization, deserialization, schema validation, and documentation for all
+  four record syntax nodes without embedding semantic identities.
+- A separate predeclared module type namespace with compiler-internal type symbols, forward and
+  recursive references, ordered record definitions, and nominal `RecordType` identity.
+- Record construction shape/type diagnostics, contextual field promotion, immutable field access,
+  nested records, function integration, and homogeneous lists of records.
+- Controlled `KajRecord` runtime values with source-order field evaluation, explicit field lookup,
+  nominal identity, rebinding, and no Python attribute or field-mutation leakage.
 
 ## Decisions Made During Checkpoint 1
 
@@ -234,15 +244,30 @@
 - `for` evaluates its list once and creates a fresh symbol-identity block environment per element;
   existing return unwinding propagates through the loop unchanged.
 
+## Decisions Made During Checkpoint 10
+
+- Record declarations introduce only type-namespace identities; ordinary value symbols and record
+  type symbols remain separate even when their spellings match.
+- Every top-level record name is predeclared before any field annotation is resolved, allowing
+  forward and recursive type references without performing native-layout analysis.
+- `RecordType` equality is based on its unique `TypeSymbol`, never on field shape, so structurally
+  identical declarations remain nominally incompatible.
+- Constructor expressions retain source field order for evaluation while semantic and runtime
+  field association remains name-based.
+- Record values and fields are immutable. A `var` binding may be rebound to another value of the
+  same nominal record type, but field assignment receives a stable semantic diagnostic.
+- Records have no methods, inheritance, structural compatibility, defaults, whole-record printing,
+  equality, or dynamic Python attributes.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–9 scope.
-- Maps and later collections, user-defined types, formatting, AST patches, compiler IR, and
-  deferred language nodes remain intentionally unimplemented.
+- None within the completed Checkpoint 0–10 scope.
+- Enums/match, maps and later collections, formatting, AST patches, compiler IR, and deferred
+  language nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 409 tests passed.
+- `pytest`: 432 tests passed.
 - `ruff check .`: passed.
 - `mypy src`: passed under strict mode for 31 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.

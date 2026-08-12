@@ -17,3 +17,15 @@ class FunctionDeclaration(Statement):
     parameters: tuple[Parameter, ...]
     return_type: TypeExpression
     body: Block
+
+
+@dataclass(frozen=True)
+class RecordFieldDeclaration(Node):
+    name: str
+    type_annotation: TypeExpression
+
+
+@dataclass(frozen=True)
+class RecordDeclaration(Statement):
+    name: str
+    fields: tuple[RecordFieldDeclaration, ...]

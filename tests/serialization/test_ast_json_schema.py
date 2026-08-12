@@ -35,6 +35,7 @@ def test_schema_is_valid_draft_2020_12(schema: object) -> None:
         "for item in items { print(item) }",
         "fn noop() -> None { return }",
         "fn add(var a: Int, b: List<Int>) -> Int { return a + b[0] }",
+        'type User { name: String age: Int } let user = User { name: "A", age: 1 }',
     ],
 )
 def test_emitted_documents_validate_against_schema(

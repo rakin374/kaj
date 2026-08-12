@@ -30,6 +30,8 @@ from kaj.ast import (
     MemberAccessExpression,
     NoneLiteral,
     Program,
+    RecordConstructionExpression,
+    RecordDeclaration,
     ReturnStatement,
     Statement,
     StringLiteral,
@@ -40,11 +42,12 @@ from kaj.ast import (
 from kaj.runtime.environment import Environment
 from kaj.runtime.errors import RuntimeErrorInfo, RuntimeFailure
 from kaj.runtime.output import BufferOutput, RuntimeOutput
-from kaj.runtime.values import BuiltinFunction, KajFunction, KajList, RuntimeValue
+from kaj.runtime.values import BuiltinFunction, KajFunction, KajList, KajRecord, RuntimeValue
 from kaj.semantic import (
     FunctionType,
     ListType,
     PrimitiveType,
+    RecordType,
     ResolutionResult,
     SemanticType,
     Symbol,
@@ -88,7 +91,7 @@ class Interpreter:
             self._install_builtins(builtin_environment)
             self._install_functions(program, module_environment)
             for statement in program.statements:
-                if not isinstance(statement, FunctionDeclaration):
+                if not isinstance(statement, (FunctionDeclaration, RecordDeclaration)):
                     self._execute_statement(statement, module_environment)
         except RuntimeFailure as failure:
             return ExecutionResult(None, self._captured_output(), failure.error)
@@ -193,7 +196,7 @@ class Interpreter:
             )
         elif isinstance(statement, Block):
             self._execute_block(statement, Environment(environment))
-        elif isinstance(statement, FunctionDeclaration):
+        elif isinstance(statement, (FunctionDeclaration, RecordDeclaration)):
             return
         elif isinstance(statement, (BreakStatement, ContinueStatement)):
             self._fail(
@@ -286,6 +289,31 @@ class Interpreter:
             return self._evaluate_binary(expression, environment)
         if isinstance(expression, CallExpression):
             return self._evaluate_call(expression, environment)
+        if isinstance(expression, RecordConstructionExpression):
+            record_type = self._expression_type(expression)
+            if not isinstance(record_type, RecordType):
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Record construction has no static record type.",
+                    expression.span,
+                )
+            fields: list[tuple[str, RuntimeValue]] = []
+            for initializer in expression.fields:
+                field = self._types.field_for_initializer(initializer)
+                if field is None:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR",
+                        "Record initializer has no field mapping.",
+                        initializer.span,
+                    )
+                value = self._coerce(
+                    self._evaluate(initializer.value, environment),
+                    self._expression_type(initializer.value),
+                    field.type,
+                    initializer.span,
+                )
+                fields.append((field.name, value))
+            return KajRecord(record_type, tuple(fields))
         if isinstance(expression, ListLiteral):
             list_type = self._expression_type(expression)
             if not isinstance(list_type, ListType):
@@ -320,6 +348,15 @@ class Interpreter:
             object_value = self._evaluate(expression.object, environment)
             if isinstance(object_value, KajList) and expression.member == "count":
                 return len(object_value.elements)
+            if isinstance(object_value, KajRecord):
+                try:
+                    return object_value.read(expression.member)
+                except KeyError:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR",
+                        f"Record field '{expression.member}' is absent at runtime.",
+                        expression.span,
+                    )
             self._fail(
                 "RUNTIME_INVALID_OPERATION",
                 f"Unsupported runtime member '{expression.member}'.",

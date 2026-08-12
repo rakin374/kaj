@@ -31,6 +31,9 @@ from kaj.ast import (
     NoneLiteral,
     Parameter,
     Program,
+    RecordConstructionExpression,
+    RecordDeclaration,
+    RecordFieldInitializer,
     ReturnStatement,
     Statement,
     StringLiteral,
@@ -49,7 +52,11 @@ from kaj.semantic.types import (
     FunctionType,
     ListType,
     PrimitiveType,
+    RecordDefinition,
+    RecordField,
+    RecordType,
     SemanticType,
+    TypeSymbol,
     ValueType,
     format_type,
     is_assignable,
@@ -77,11 +84,19 @@ class MappedArgument:
 
 
 @dataclass(frozen=True)
+class MappedRecordField:
+    initializer: RecordFieldInitializer
+    field: RecordField
+
+
+@dataclass(frozen=True)
 class TypeCheckResult:
     resolution: ResolutionResult
     expressions: tuple[TypedExpression, ...]
     symbols: tuple[TypedSymbol, ...]
     arguments: tuple[MappedArgument, ...]
+    records: tuple[RecordDefinition, ...]
+    record_fields: tuple[MappedRecordField, ...]
     diagnostics: tuple[Diagnostic, ...]
 
     def type_of_expression(self, expression: Expression) -> SemanticType | None:
@@ -108,6 +123,18 @@ class TypeCheckResult:
                 return mapped
         return None
 
+    def field_for_initializer(self, initializer: RecordFieldInitializer) -> RecordField | None:
+        for mapped in self.record_fields:
+            if mapped.initializer is initializer:
+                return mapped.field
+        return None
+
+    def record_definition(self, record_type: RecordType) -> RecordDefinition | None:
+        for definition in self.records:
+            if definition.type == record_type:
+                return definition
+        return None
+
 
 class TypeChecker:
     def __init__(self, resolution: ResolutionResult) -> None:
@@ -119,6 +146,10 @@ class TypeChecker:
         self._mapped_arguments: list[MappedArgument] = []
         self._diagnostics: list[Diagnostic] = []
         self._current_return_type: ValueType | None = None
+        self._record_types_by_name: dict[str, RecordType] = {}
+        self._record_types_by_declaration: dict[int, RecordType] = {}
+        self._record_definitions: list[RecordDefinition] = []
+        self._mapped_record_fields: list[MappedRecordField] = []
 
     def check(self, program: Program) -> TypeCheckResult:
         self._expression_types = {}
@@ -128,6 +159,12 @@ class TypeChecker:
         self._mapped_arguments = []
         self._diagnostics = []
         self._current_return_type = None
+        self._record_types_by_name = {}
+        self._record_types_by_declaration = {}
+        self._record_definitions = []
+        self._mapped_record_fields = []
+        self._predeclare_records(program)
+        self._define_records(program)
         for symbol in self._resolution.symbols:
             if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name == "print":
                 self._record_symbol(symbol, BuiltinFunctionType.PRINT)
@@ -141,6 +178,8 @@ class TypeChecker:
             expressions=tuple(self._expression_types.values()),
             symbols=tuple(self._symbol_types.values()),
             arguments=tuple(self._mapped_arguments),
+            records=tuple(self._record_definitions),
+            record_fields=tuple(self._mapped_record_fields),
             diagnostics=tuple(self._diagnostics),
         )
 
@@ -158,6 +197,45 @@ class TypeChecker:
             return PrimitiveType.ERROR
         typed = self._symbol_types.get(symbol.id)
         return PrimitiveType.ERROR if typed is None else typed.type
+
+    def _predeclare_records(self, program: Program) -> None:
+        next_id = 0
+        for statement in program.statements:
+            if not isinstance(statement, RecordDeclaration):
+                continue
+            if statement.name in self._record_types_by_name:
+                self._diagnose(
+                    "TYPE_DUPLICATE_TYPE_NAME",
+                    f"Type '{statement.name}' is already declared.",
+                    statement.span,
+                )
+                continue
+            record_type = RecordType(TypeSymbol(next_id, statement.name, statement.span))
+            next_id += 1
+            self._record_types_by_name[statement.name] = record_type
+            self._record_types_by_declaration[id(statement)] = record_type
+
+    def _define_records(self, program: Program) -> None:
+        for statement in program.statements:
+            if not isinstance(statement, RecordDeclaration):
+                continue
+            record_type = self._record_types_by_declaration.get(id(statement))
+            if record_type is None:
+                continue
+            fields: list[RecordField] = []
+            names: set[str] = set()
+            for field in statement.fields:
+                field_type = self._resolve_annotation(field.type_annotation)
+                if field.name in names:
+                    self._diagnose(
+                        "TYPE_DUPLICATE_FIELD",
+                        f"Field '{field.name}' is declared more than once.",
+                        field.span,
+                    )
+                    continue
+                names.add(field.name)
+                fields.append(RecordField(field.name, field_type, field.span))
+            self._record_definitions.append(RecordDefinition(record_type, tuple(fields)))
 
     def _declare_function_signature(self, declaration: FunctionDeclaration) -> None:
         parameters = tuple(
@@ -192,6 +270,9 @@ class TypeChecker:
                     annotation.span,
                 )
                 return PrimitiveType.ERROR
+            record_type = self._record_types_by_name.get(annotation.name)
+            if record_type is not None:
+                return record_type
         elif isinstance(annotation, GenericType):
             if annotation.base.name == "List":
                 if len(annotation.arguments) != 1:
@@ -295,6 +376,8 @@ class TypeChecker:
                     f"Function '{statement.name}' may reach its end without returning.",
                     statement.span,
                 )
+        elif isinstance(statement, RecordDeclaration):
+            return
         elif isinstance(statement, ReturnStatement):
             self._check_return(statement)
         elif isinstance(statement, Block):
@@ -326,6 +409,15 @@ class TypeChecker:
             self._diagnose(
                 "TYPE_MISMATCH",
                 "List index assignment is not supported in Kaj v0 Checkpoint 9.",
+                statement.target.span,
+            )
+            return
+        if isinstance(statement.target, MemberAccessExpression) and isinstance(
+            self._recorded_expression_type(statement.target.object), RecordType
+        ):
+            self._diagnose(
+                "TYPE_FIELD_ASSIGNMENT_NOT_SUPPORTED",
+                "Record fields are immutable in Kaj v0.",
                 statement.target.span,
             )
             return
@@ -387,6 +479,8 @@ class TypeChecker:
             result = self._infer_binary_types(expression.operator, left, right, expression.span)
         elif isinstance(expression, CallExpression):
             result = self._infer_call(expression)
+        elif isinstance(expression, RecordConstructionExpression):
+            result = self._infer_record_construction(expression)
         elif isinstance(expression, MemberAccessExpression):
             object_type = self._infer(expression.object)
             if isinstance(object_type, ListType):
@@ -399,6 +493,22 @@ class TypeChecker:
                         expression.span,
                     )
                     result = PrimitiveType.ERROR
+            elif isinstance(object_type, RecordType):
+                definition = self._record_definition(object_type)
+                field = next(
+                    (item for item in definition.fields if item.name == expression.member),
+                    None,
+                )
+                if field is None:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_FIELD",
+                        f"Record '{object_type.symbol.name}' has no field "
+                        f"'{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
+                else:
+                    result = field.type
             else:
                 result = PrimitiveType.ERROR
         elif isinstance(expression, IndexExpression):
@@ -464,7 +574,7 @@ class TypeChecker:
                 expression.span,
             )
             return PrimitiveType.ERROR
-        if isinstance(common, (PrimitiveType, ListType)):
+        if isinstance(common, (PrimitiveType, ListType, RecordType)):
             return ListType(common)
         self._diagnose(
             "TYPE_MISMATCH",
@@ -472,6 +582,65 @@ class TypeChecker:
             expression.span,
         )
         return PrimitiveType.ERROR
+
+    def _record_definition(self, record_type: RecordType) -> RecordDefinition:
+        for definition in self._record_definitions:
+            if definition.type == record_type:
+                return definition
+        raise RuntimeError(f"Missing definition for record {record_type.symbol.name}")
+
+    def _infer_record_construction(
+        self, expression: RecordConstructionExpression
+    ) -> SemanticType:
+        record_type = self._record_types_by_name.get(expression.type_name)
+        if record_type is None:
+            for initializer in expression.fields:
+                self._infer(initializer.value)
+            self._diagnose(
+                "TYPE_UNKNOWN_TYPE",
+                f"Unknown record type '{expression.type_name}'.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        definition = self._record_definition(record_type)
+        fields_by_name = {field.name: field for field in definition.fields}
+        supplied: set[str] = set()
+        for initializer in expression.fields:
+            field = fields_by_name.get(initializer.name)
+            if initializer.name in supplied:
+                self._infer(initializer.value, None if field is None else field.type)
+                self._diagnose(
+                    "TYPE_DUPLICATE_FIELD",
+                    f"Field '{initializer.name}' is initialized more than once.",
+                    initializer.span,
+                )
+                continue
+            supplied.add(initializer.name)
+            if field is None:
+                self._infer(initializer.value)
+                self._diagnose(
+                    "TYPE_UNKNOWN_FIELD",
+                    f"Record '{expression.type_name}' has no field '{initializer.name}'.",
+                    initializer.span,
+                )
+                continue
+            value_type = self._infer(initializer.value, field.type)
+            self._mapped_record_fields.append(MappedRecordField(initializer, field))
+            if not is_assignable(value_type, field.type):
+                self._diagnose(
+                    "TYPE_MISMATCH",
+                    f"Cannot initialize field '{field.name}' of type "
+                    f"{format_type(field.type)} with {format_type(value_type)}.",
+                    initializer.value.span,
+                )
+        missing = [field.name for field in definition.fields if field.name not in supplied]
+        if missing:
+            self._diagnose(
+                "TYPE_MISSING_FIELD",
+                f"Missing required field(s): {', '.join(missing)}.",
+                expression.span,
+            )
+        return record_type
 
     def _infer_unary(self, expression: UnaryExpression) -> PrimitiveType:
         operand = self._infer(expression.operand)

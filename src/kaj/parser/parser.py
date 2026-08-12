@@ -36,6 +36,10 @@ from kaj.ast import (
     NoneLiteral,
     Parameter,
     Program,
+    RecordConstructionExpression,
+    RecordDeclaration,
+    RecordFieldDeclaration,
+    RecordFieldInitializer,
     ReturnStatement,
     Statement,
     StringLiteral,
@@ -92,6 +96,7 @@ STATEMENT_STARTS = {
     TokenKind.LET,
     TokenKind.VAR,
     TokenKind.FN,
+    TokenKind.TYPE,
     TokenKind.IF,
     TokenKind.WHILE,
     TokenKind.FOR,
@@ -101,7 +106,6 @@ STATEMENT_STARTS = {
 }
 
 DEFERRED_STATEMENT_KEYWORDS = {
-    TokenKind.TYPE,
     TokenKind.ENUM,
     TokenKind.NEWTYPE,
     TokenKind.MATCH,
@@ -127,10 +131,12 @@ class Parser:
         self.filename = filename
         self._index = 0
         self._diagnostics: list[Diagnostic] = []
+        self._parsing_control_condition = False
 
     def parse(self) -> ParserResult:
         self._index = 0
         self._diagnostics.clear()
+        self._parsing_control_condition = False
         statements: list[Statement] = []
 
         while not self._check(TokenKind.EOF):
@@ -163,6 +169,8 @@ class Parser:
             return self._parse_binding(self._previous(), BindingKind.VAR)
         if self._match(TokenKind.FN):
             return self._parse_function(self._previous())
+        if self._match(TokenKind.TYPE):
+            return self._parse_record_declaration(self._previous())
         if self._match(TokenKind.IF):
             return self._parse_if(self._previous())
         if self._match(TokenKind.WHILE):
@@ -262,6 +270,48 @@ class Parser:
             mutable=mutable_token is not None,
         )
 
+    def _parse_record_declaration(self, start: Token) -> RecordDeclaration:
+        name = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a record type name.",
+        )
+        self._consume(
+            TokenKind.LEFT_BRACE,
+            PARSE_EXPECTED_TOKEN,
+            "Expected '{' after record type name.",
+        )
+        fields: list[RecordFieldDeclaration] = []
+        while not self._check(TokenKind.RIGHT_BRACE) and not self._check(TokenKind.EOF):
+            field_name = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected a record field name.",
+            )
+            self._consume(
+                TokenKind.COLON,
+                PARSE_EXPECTED_TOKEN,
+                "Expected ':' after record field name.",
+            )
+            annotation = self._parse_type_expression()
+            fields.append(
+                RecordFieldDeclaration(
+                    span=SourceSpan(field_name.span.start, annotation.span.end),
+                    name=field_name.lexeme,
+                    type_annotation=annotation,
+                )
+            )
+        end = self._consume(
+            TokenKind.RIGHT_BRACE,
+            PARSE_EXPECTED_TOKEN,
+            "Expected '}' after record fields.",
+        )
+        return RecordDeclaration(
+            span=SourceSpan(start.span.start, end.span.end),
+            name=name.lexeme,
+            fields=tuple(fields),
+        )
+
     def _parse_type_expression(self) -> TypeExpression:
         name = self._consume(
             TokenKind.IDENTIFIER,
@@ -287,7 +337,7 @@ class Parser:
         )
 
     def _parse_if(self, start: Token) -> IfStatement:
-        condition = self._parse_expression()
+        condition = self._parse_control_condition()
         then_branch = self._parse_block()
         else_branch: Block | IfStatement | None = None
         if self._match(TokenKind.ELSE):
@@ -304,13 +354,20 @@ class Parser:
         )
 
     def _parse_while(self, start: Token) -> WhileStatement:
-        condition = self._parse_expression()
+        condition = self._parse_control_condition()
         body = self._parse_block()
         return WhileStatement(
             span=SourceSpan(start.span.start, body.span.end),
             condition=condition,
             body=body,
         )
+
+    def _parse_control_condition(self) -> Expression:
+        self._parsing_control_condition = True
+        try:
+            return self._parse_expression()
+        finally:
+            self._parsing_control_condition = False
 
     def _parse_for(self, start: Token) -> ForStatement:
         name = self._consume(
@@ -562,6 +619,8 @@ class Parser:
         if token.kind is TokenKind.NONE:
             return NoneLiteral(span=token.span)
         if token.kind is TokenKind.IDENTIFIER:
+            if self._check(TokenKind.LEFT_BRACE) and self._looks_like_record_construction():
+                return self._finish_record_construction(token)
             return Identifier(span=token.span, name=token.lexeme)
         if token.kind is TokenKind.LEFT_PAREN:
             expression = self._parse_expression()
@@ -576,6 +635,58 @@ class Parser:
         if token.kind is TokenKind.LEFT_BRACE:
             return self._finish_map(token)
         raise AssertionError("Unhandled primary token kind")
+
+    def _looks_like_record_construction(self) -> bool:
+        brace_index = self._index
+        next_index = min(brace_index + 1, len(self.tokens) - 1)
+        after_index = min(brace_index + 2, len(self.tokens) - 1)
+        return (
+            not self._parsing_control_condition
+            and self.tokens[next_index].kind is TokenKind.RIGHT_BRACE
+        ) or (
+            self.tokens[next_index].kind is TokenKind.IDENTIFIER
+            and self.tokens[after_index].kind is TokenKind.COLON
+        )
+
+    def _finish_record_construction(self, name: Token) -> RecordConstructionExpression:
+        self._consume(
+            TokenKind.LEFT_BRACE,
+            PARSE_EXPECTED_TOKEN,
+            "Expected '{' after record type name.",
+        )
+        fields: list[RecordFieldInitializer] = []
+        if not self._check(TokenKind.RIGHT_BRACE):
+            while True:
+                field_name = self._consume(
+                    TokenKind.IDENTIFIER,
+                    PARSE_EXPECTED_IDENTIFIER,
+                    "Expected a record initializer field name.",
+                )
+                self._consume(
+                    TokenKind.COLON,
+                    PARSE_EXPECTED_TOKEN,
+                    "Expected ':' after record initializer field name.",
+                )
+                value = self._parse_expression()
+                fields.append(
+                    RecordFieldInitializer(
+                        span=SourceSpan(field_name.span.start, value.span.end),
+                        name=field_name.lexeme,
+                        value=value,
+                    )
+                )
+                if not self._match(TokenKind.COMMA):
+                    break
+        end = self._consume(
+            TokenKind.RIGHT_BRACE,
+            PARSE_EXPECTED_TOKEN,
+            "Expected '}' after record initializer fields.",
+        )
+        return RecordConstructionExpression(
+            span=SourceSpan(name.span.start, end.span.end),
+            type_name=name.lexeme,
+            fields=tuple(fields),
+        )
 
     def _finish_list(self, start: Token) -> ListLiteral:
         elements: list[Expression] = []

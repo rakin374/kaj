@@ -85,3 +85,15 @@ class MapEntry(Node):
 @dataclass(frozen=True)
 class MapLiteral(Expression):
     entries: tuple[MapEntry, ...]
+
+
+@dataclass(frozen=True)
+class RecordFieldInitializer(Node):
+    name: str
+    value: Expression
+
+
+@dataclass(frozen=True)
+class RecordConstructionExpression(Expression):
+    type_name: str
+    fields: tuple[RecordFieldInitializer, ...]

@@ -1120,3 +1120,30 @@ Checkpoint 2 is complete when:
 ```
 
 Checkpoint 3 may then implement the parser that produces these nodes.
+# Checkpoint 10 Record Extension
+
+Checkpoint 10 adds these immutable, syntax-only Core AST nodes:
+
+```text
+RecordDeclaration(Statement)
+    name: str
+    fields: tuple[RecordFieldDeclaration, ...]
+
+RecordFieldDeclaration(Node)
+    name: str
+    type_annotation: TypeExpression
+
+RecordConstructionExpression(Expression)
+    type_name: str
+    fields: tuple[RecordFieldInitializer, ...]
+
+RecordFieldInitializer(Node)
+    name: str
+    value: Expression
+```
+
+Field tuples preserve source order. These nodes carry source spans and no resolved type symbols,
+semantic field mappings, or runtime values. Record declarations are module-level statements;
+record construction is an explicit expression and is not represented as a function call.
+
+---

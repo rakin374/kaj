@@ -9,7 +9,12 @@ from kaj.ast.base import (
     TypeExpression,
     UnaryOperator,
 )
-from kaj.ast.declarations import FunctionDeclaration, Parameter
+from kaj.ast.declarations import (
+    FunctionDeclaration,
+    Parameter,
+    RecordDeclaration,
+    RecordFieldDeclaration,
+)
 from kaj.ast.expressions import (
     BinaryExpression,
     BooleanLiteral,
@@ -24,6 +29,8 @@ from kaj.ast.expressions import (
     MapLiteral,
     MemberAccessExpression,
     NoneLiteral,
+    RecordConstructionExpression,
+    RecordFieldInitializer,
     StringLiteral,
     UnaryExpression,
 )
@@ -73,6 +80,10 @@ __all__ = [
     "NoneLiteral",
     "Parameter",
     "Program",
+    "RecordConstructionExpression",
+    "RecordDeclaration",
+    "RecordFieldDeclaration",
+    "RecordFieldInitializer",
     "ReturnStatement",
     "Statement",
     "StringLiteral",

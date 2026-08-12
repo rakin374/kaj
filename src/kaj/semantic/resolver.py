@@ -27,6 +27,8 @@ from kaj.ast import (
     Node,
     NoneLiteral,
     Program,
+    RecordConstructionExpression,
+    RecordDeclaration,
     ReturnStatement,
     Statement,
     StringLiteral,
@@ -212,7 +214,7 @@ class Resolver:
             # Named functions are module-level only in Kaj v0. Valid parsed programs
             # reach function declarations through the module traversal above.
             return
-        elif isinstance(statement, (BreakStatement, ContinueStatement)):
+        elif isinstance(statement, (RecordDeclaration, BreakStatement, ContinueStatement)):
             return
         else:
             raise TypeError(f"Unsupported statement node: {type(statement).__name__}")
@@ -251,6 +253,9 @@ class Resolver:
             for entry in expression.entries:
                 self._resolve_expression(entry.key, scope)
                 self._resolve_expression(entry.value, scope)
+        elif isinstance(expression, RecordConstructionExpression):
+            for field in expression.fields:
+                self._resolve_expression(field.value, scope)
         elif isinstance(
             expression,
             (

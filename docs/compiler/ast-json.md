@@ -2968,3 +2968,25 @@ IR
 ```
 
 Kaj AST JSON exists to exchange syntax structure safely and deterministically across tools and agents without making JSON the compiler's internal execution model.
+
+---
+
+# 73. Checkpoint 10 Record Nodes
+
+During pre-release AST JSON v1 evolution, Checkpoint 10 adds four syntax-only node kinds:
+
+```text
+record_declaration
+record_field_declaration
+record_construction_expression
+record_field_initializer
+```
+
+`record_declaration` is a statement with `name` and an ordered `fields` array.
+Each `record_field_declaration` contains `name` and `type_annotation`.
+
+`record_construction_expression` is an expression with `type_name` and an ordered `fields`
+array. Each `record_field_initializer` contains `name` and `value`.
+
+All four nodes include ordinary v1 source spans, reject unknown fields, and preserve source order.
+They contain no type-symbol identity, resolved field mapping, semantic type, or runtime value.

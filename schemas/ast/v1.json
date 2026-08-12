@@ -52,7 +52,8 @@
         { "$ref": "#/$defs/memberAccessExpression" },
         { "$ref": "#/$defs/indexExpression" },
         { "$ref": "#/$defs/listLiteral" },
-        { "$ref": "#/$defs/mapLiteral" }
+        { "$ref": "#/$defs/mapLiteral" },
+        { "$ref": "#/$defs/recordConstructionExpression" }
       ]
     },
     "typeExpression": {
@@ -73,7 +74,8 @@
         { "$ref": "#/$defs/breakStatement" },
         { "$ref": "#/$defs/continueStatement" },
         { "$ref": "#/$defs/returnStatement" },
-        { "$ref": "#/$defs/functionDeclaration" }
+        { "$ref": "#/$defs/functionDeclaration" },
+        { "$ref": "#/$defs/recordDeclaration" }
       ]
     },
     "program": {
@@ -512,6 +514,72 @@
             "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
             "return_type": { "$ref": "#/$defs/typeExpression" },
             "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "recordFieldInitializer": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "value"],
+          "properties": {
+            "kind": { "const": "record_field_initializer" },
+            "name": { "type": "string" },
+            "value": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "recordConstructionExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["type_name", "fields"],
+          "properties": {
+            "kind": { "const": "record_construction_expression" },
+            "type_name": { "type": "string" },
+            "fields": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/recordFieldInitializer" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "recordFieldDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "type_annotation"],
+          "properties": {
+            "kind": { "const": "record_field_declaration" },
+            "name": { "type": "string" },
+            "type_annotation": { "$ref": "#/$defs/typeExpression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "recordDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "fields"],
+          "properties": {
+            "kind": { "const": "record_declaration" },
+            "name": { "type": "string" },
+            "fields": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/recordFieldDeclaration" }
+            }
           }
         }
       ],

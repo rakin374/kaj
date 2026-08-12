@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from kaj.source import SourceSpan
+
 
 class PrimitiveType(Enum):
     BOOL = "Bool"
@@ -16,10 +18,35 @@ class PrimitiveType(Enum):
 
 @dataclass(frozen=True)
 class ListType:
-    element_type: PrimitiveType | ListType
+    element_type: ValueType
 
 
-type ValueType = PrimitiveType | ListType
+@dataclass(frozen=True)
+class TypeSymbol:
+    id: int
+    name: str
+    declaration_span: SourceSpan
+
+
+@dataclass(frozen=True)
+class RecordType:
+    symbol: TypeSymbol
+
+
+type ValueType = PrimitiveType | ListType | RecordType
+
+
+@dataclass(frozen=True)
+class RecordField:
+    name: str
+    type: ValueType
+    declaration_span: SourceSpan
+
+
+@dataclass(frozen=True)
+class RecordDefinition:
+    type: RecordType
+    fields: tuple[RecordField, ...]
 
 
 @dataclass(frozen=True)
@@ -62,5 +89,7 @@ def format_type(semantic_type: SemanticType) -> str:
         return f"<builtin {semantic_type.value}>"
     if isinstance(semantic_type, ListType):
         return f"List<{format_type(semantic_type.element_type)}>"
+    if isinstance(semantic_type, RecordType):
+        return semantic_type.symbol.name
     parameters = ", ".join(format_type(parameter.type) for parameter in semantic_type.parameters)
     return f"({parameters}) -> {format_type(semantic_type.return_type)}"

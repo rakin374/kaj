@@ -16,7 +16,7 @@ from kaj.parser import ParserResult
         ("fn f(x Int) -> Int {}", "PARSE_EXPECTED_TOKEN"),
         ("fn f() Int {}", "PARSE_EXPECTED_TOKEN"),
         ("fn f() -> {}", "PARSE_EXPECTED_TYPE"),
-        ("type User", "PARSE_UNEXPECTED_TOKEN"),
+        ("type User", "PARSE_EXPECTED_TOKEN"),
         ("1 = 2", "PARSE_INVALID_ASSIGNMENT_TARGET"),
         ("f(a: 1, b)", "PARSE_POSITIONAL_AFTER_NAMED_ARGUMENT"),
     ],
