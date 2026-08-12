@@ -1,5 +1,7 @@
 # Kaj Canonical Formatting
 
+> **Interpolated strings:** Canonical formatting renders embedded expressions with ordinary expression spacing and literal braces as `{{` and `}}`. Parse → format → parse preserves ordered interpolation parts.
+
 **Status:** Authoritative for Kaj v0 source formatting semantics  
 **Scope:** canonical `.kaj` rendering from AST  
 **Not covered:** comment preservation, source-to-source minimal diffs, user-configurable style profiles, CST formatting

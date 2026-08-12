@@ -1,0 +1,10 @@
+fn classify(value: Int) -> String {
+    if value % 2 == 0 { return "even" }
+    return "odd"
+}
+
+for value in range(0, 8) {
+    if value == 2 { continue }
+    if value == 7 { break }
+    print("{value}: {classify(value)}")
+}

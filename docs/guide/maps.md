@@ -21,6 +21,12 @@ print(prices.count)
 
 Supported key types are `Bool`, `Int`, `Decimal`, `String`, `Bytes`, and newtypes whose underlying type ultimately resolves to one of those. Map literals evaluate in source order; duplicate evaluated keys are a runtime error.
 
-Maps do not support mutation or `for` iteration in Kaj v0.
+Maps are immutable but iterable in insertion order:
+
+```kaj
+for entry in ages {
+    print("{entry.key}: {entry.value}")
+}
+```
 
 Reference: [map semantics](../language/maps.md).

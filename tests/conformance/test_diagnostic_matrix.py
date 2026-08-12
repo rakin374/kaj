@@ -35,6 +35,7 @@ def test_lexical_invalid_constructs_have_one_exact_code(source: str, code: str) 
         ("let x:", ("PARSE_EXPECTED_TYPE",)),
         ("1 = 2", ("PARSE_INVALID_ASSIGNMENT_TARGET",)),
         ("f(a: 1, 2)", ("PARSE_POSITIONAL_AFTER_NAMED_ARGUMENT",)),
+        ('print("bad {value")', ("PARSE_INVALID_INTERPOLATION",)),
     ],
 )
 def test_parser_invalid_constructs_have_exact_ordered_codes(
@@ -85,6 +86,12 @@ def test_parser_invalid_constructs_have_exact_ordered_codes(
         ("let x = {}", ("TYPE_CANNOT_INFER_MAP_TYPE",)),
         ("let x: Map<List<Int>, Int> = {}", ("TYPE_INVALID_MAP_KEY_TYPE",)),
         ("newtype A = A", ("TYPE_RECURSIVE_NEWTYPE",)),
+        (
+            'fn f() -> Int { return 1 } print("{f}")',
+            ("TYPE_INTERPOLATION_NOT_DISPLAYABLE",),
+        ),
+        ("break", ("CONTROL_BREAK_OUTSIDE_LOOP",)),
+        ("continue", ("CONTROL_CONTINUE_OUTSIDE_LOOP",)),
     ],
 )
 def test_semantic_invalid_constructs_have_exact_ordered_codes(
@@ -129,7 +136,17 @@ def test_every_implementation_diagnostic_code_is_named_by_a_behavior_test() -> N
     root = Path(__file__).parents[2]
     implementation = "\n".join(path.read_text() for path in (root / "src" / "kaj").rglob("*.py"))
     tests = "\n".join(path.read_text() for path in (root / "tests").rglob("*.py"))
-    prefixes = ("LEX_", "PARSE_", "ASTJSON_", "RESOLVE_", "TYPE_", "ASSIGN_", "RUNTIME_", "IMPORT_")
+    prefixes = (
+        "LEX_",
+        "PARSE_",
+        "ASTJSON_",
+        "RESOLVE_",
+        "TYPE_",
+        "ASSIGN_",
+        "CONTROL_",
+        "RUNTIME_",
+        "IMPORT_",
+    )
     import re
 
     codes = set(re.findall(r'"([A-Z][A-Z0-9_]+)"', implementation))

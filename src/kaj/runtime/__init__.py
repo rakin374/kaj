@@ -8,11 +8,14 @@ from kaj.runtime.values import (
     KajFunction,
     KajList,
     KajMap,
+    KajMapEntry,
     KajMapKey,
     KajModuleValue,
     KajNewtypeValue,
+    KajRange,
     KajRecord,
     RuntimeValue,
+    decode_utf8,
 )
 
 __all__ = [
@@ -25,13 +28,16 @@ __all__ = [
     "KajFunction",
     "KajList",
     "KajMap",
+    "KajMapEntry",
     "KajMapKey",
     "KajModuleValue",
     "KajNewtypeValue",
+    "KajRange",
     "KajRecord",
     "RuntimeErrorInfo",
     "RuntimeOutput",
     "RuntimeSlot",
     "RuntimeValue",
     "StreamOutput",
+    "decode_utf8",
 ]

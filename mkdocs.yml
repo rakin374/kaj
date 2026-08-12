@@ -28,6 +28,9 @@ nav:
   - Language Reference:
       - Lexical Structure: language/lexical-structure.md
       - Primitive Types: language/primitive-types.md
+      - Strings and Conversion: language/strings-and-conversion.md
+      - Loop Control and Ranges: language/loop-control-and-ranges.md
+      - Equality and Display: language/equality-and-display.md
       - Functions: language/functions.md
       - Lists: language/lists.md
       - Records: language/records.md

@@ -75,7 +75,7 @@ def test_lookup_returns_optional_and_checks_key() -> None:
     assert codes("let values: Map<Decimal, Int> = {} let x = values[1]") == []
 
 
-def test_map_count_functions_and_no_iteration_or_mutation() -> None:
+def test_map_count_functions_iteration_and_no_mutation() -> None:
     assert (
         codes(
             "fn find(values: Map<String, Int>, key: String) -> Optional<Int> { return values[key] }"
@@ -84,5 +84,5 @@ def test_map_count_functions_and_no_iteration_or_mutation() -> None:
     )
     assert codes('let values = {"a": 1} let n = values.count') == []
     assert codes('let values = {"a": 1} let n = values.keys') == ["TYPE_UNKNOWN_MEMBER"]
-    assert "TYPE_NOT_ITERABLE" in codes('let values = {"a": 1} for item in values { break }')
+    assert codes('let values = {"a": 1} for item in values { print(item.key) }') == []
     assert "TYPE_MISMATCH" in codes('let values = {"a": 1} values["a"] = 2')

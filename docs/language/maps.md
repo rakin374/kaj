@@ -1,8 +1,10 @@
 # Kaj Maps
 
 **Status:** Authoritative for Kaj v0 map semantics  
-**Scope:** `Map<K, V>`, map literals, safe lookup, and `count`  
-**Not covered:** map mutation, map iteration, ordered-map APIs, merging, key/value views, comprehensions
+**Scope:** `Map<K, V>`, map literals, safe lookup, `count`, and insertion-ordered iteration
+**Not covered:** map mutation, ordered-map APIs beyond iteration, merging, key/value views, comprehensions
+
+Maps are iterable in insertion order. `for entry in map` binds an internal `MapEntry<K, V>` with immutable `.key` and `.value` members. Map lookup remains `Optional<V>`.
 
 ---
 
@@ -606,28 +608,22 @@ A `var` binding containing a map may be rebound to another compatible map value.
 
 ---
 
-# 24. No Map Iteration Yet
+# 24. Map Iteration
 
-Checkpoint 13 does not make `Map<K, V>` directly iterable.
-
-This remains invalid:
+Checkpoint 22 makes `Map<K, V>` directly iterable:
 
 ```kaj
-for item in map {
+for entry in map {
+    print(entry.key)
+    print(entry.value)
 }
 ```
 
-unless a future checkpoint defines map iteration semantics.
-
-`for` continues to require `List<T>`.
-
 ---
 
-# 25. No Map Ordering Contract
+# 25. Map Iteration Order
 
-Kaj v0 maps do not expose iteration, so no public iteration-order contract is defined.
-
-Internal runtime storage order must not become observable language behavior except where source evaluation order is explicitly defined during construction.
+Map iteration follows insertion order, which is the map literal's source order. This is a Kaj contract rather than an accidental property of Python storage.
 
 ---
 

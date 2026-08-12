@@ -1,0 +1,7 @@
+newtype UserId = String
+enum Status { active suspended(reason: String) }
+type User { id: UserId name: String status: Status }
+
+fn make(id: String, name: String) -> User {
+    return User { id: UserId(id), name: name, status: Status.active }
+}

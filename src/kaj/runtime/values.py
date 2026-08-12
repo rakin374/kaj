@@ -27,6 +27,18 @@ class KajList:
 
 
 @dataclass(frozen=True)
+class KajRange:
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class KajMapEntry:
+    key: RuntimeValue
+    value: RuntimeValue
+
+
+@dataclass(frozen=True)
 class KajMapKey:
     type: PrimitiveType | NewtypeType
     value: bool | int | Decimal | str | bytes | KajMapKey
@@ -93,6 +105,10 @@ class KajFunction:
 
 class BuiltinFunction(Enum):
     PRINT = "print"
+    RANGE = "range"
+    STRING = "String"
+    UTF8_ENCODE = "utf8_encode"
+    UTF8_DECODE = "utf8_decode"
 
 
 type RuntimeValue = (
@@ -103,6 +119,8 @@ type RuntimeValue = (
     | bytes
     | None
     | KajList
+    | KajRange
+    | KajMapEntry
     | KajMap
     | KajRecord
     | KajEnumValue
@@ -111,3 +129,10 @@ type RuntimeValue = (
     | KajFunction
     | BuiltinFunction
 )
+
+
+def decode_utf8(value: bytes, result_type: ResultType) -> KajEnumValue:
+    try:
+        return KajEnumValue(result_type, "ok", (value.decode("utf-8"),))
+    except UnicodeDecodeError:
+        return KajEnumValue(result_type, "err", ("invalid UTF-8",))

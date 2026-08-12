@@ -21,6 +21,7 @@ if half > 2.0 and not false { print(half) }
 ```kaj
 fn square(value: Int) -> Int { return value * value }
 for value in [1, 2, 3] { print(square(value)) }
+for value in range(0, 5) { if value == 3 { continue } print(value) }
 ```
 
 ## Recursion
@@ -66,6 +67,7 @@ match result { ok(number) => print(number) err(message) => print(message) }
 newtype UserId = String
 let id = UserId("u-1")
 print(id.value)
+print("id = {id}")
 ```
 
 ## Modules

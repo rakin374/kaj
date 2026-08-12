@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from decimal import Decimal
 from typing import Never, cast
 
@@ -35,6 +35,7 @@ from kaj.ast import (
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
+    InterpolatedString,
     ListLiteral,
     MapEntry,
     MapLiteral,
@@ -43,6 +44,7 @@ from kaj.ast import (
     MemberAccessExpression,
     NamedType,
     NewtypeDeclaration,
+    Node,
     NoneLiteral,
     Parameter,
     PatternBinding,
@@ -60,7 +62,7 @@ from kaj.ast import (
     WhileStatement,
 )
 from kaj.diagnostics import Diagnostic
-from kaj.lexer import Token, TokenKind
+from kaj.lexer import Lexer, Token, TokenKind
 from kaj.source import SourceLocation, SourceSpan
 
 PARSE_EXPECTED_EXPRESSION = "PARSE_EXPECTED_EXPRESSION"
@@ -70,6 +72,7 @@ PARSE_EXPECTED_TYPE = "PARSE_EXPECTED_TYPE"
 PARSE_UNEXPECTED_TOKEN = "PARSE_UNEXPECTED_TOKEN"
 PARSE_INVALID_ASSIGNMENT_TARGET = "PARSE_INVALID_ASSIGNMENT_TARGET"
 PARSE_POSITIONAL_AFTER_NAMED_ARGUMENT = "PARSE_POSITIONAL_AFTER_NAMED_ARGUMENT"
+PARSE_INVALID_INTERPOLATION = "PARSE_INVALID_INTERPOLATION"
 
 
 UNARY_OPERATORS: dict[TokenKind, UnaryOperator] = {
@@ -815,7 +818,7 @@ class Parser:
         if token.kind is TokenKind.DECIMAL:
             return DecimalLiteral(span=token.span, value=cast(Decimal, token.value))
         if token.kind is TokenKind.STRING:
-            return StringLiteral(span=token.span, value=cast(str, token.value))
+            return self._parse_string_token(token)
         if token.kind is TokenKind.TRUE:
             return BooleanLiteral(span=token.span, value=True)
         if token.kind is TokenKind.FALSE:
@@ -839,6 +842,99 @@ class Parser:
         if token.kind is TokenKind.LEFT_BRACE:
             return self._finish_map(token)
         raise AssertionError("Unhandled primary token kind")
+
+    def _parse_string_token(self, token: Token) -> Expression:
+        value = cast(str, token.value)
+        if "{" not in value and "}" not in value:
+            return StringLiteral(span=token.span, value=value)
+        parts: list[str | Expression] = []
+        literal: list[str] = []
+        had_escaped_brace = False
+        index = 0
+        while index < len(value):
+            character = value[index]
+            if character == "{" and index + 1 < len(value) and value[index + 1] == "{":
+                literal.append("{")
+                had_escaped_brace = True
+                index += 2
+                continue
+            if character == "}" and index + 1 < len(value) and value[index + 1] == "}":
+                literal.append("}")
+                had_escaped_brace = True
+                index += 2
+                continue
+            if character == "}":
+                self._raise(
+                    PARSE_INVALID_INTERPOLATION,
+                    "Unmatched '}' in interpolated string; use '}}' for a literal brace.",
+                    token.span,
+                )
+            if character != "{":
+                literal.append(character)
+                index += 1
+                continue
+            if literal:
+                parts.append("".join(literal))
+                literal = []
+            end = self._find_interpolation_end(value, index + 1)
+            if end is None:
+                self._raise(
+                    PARSE_INVALID_INTERPOLATION,
+                    "Unterminated interpolation in string.",
+                    token.span,
+                )
+            source = value[index + 1 : end].strip()
+            if not source:
+                self._raise(
+                    PARSE_INVALID_INTERPOLATION,
+                    "Interpolation expression cannot be empty.",
+                    token.span,
+                )
+            lexed = Lexer(source, filename=self.filename).tokenize()
+            parsed = Parser(lexed.tokens, filename=self.filename).parse()
+            if lexed.diagnostics or parsed.diagnostics or len(parsed.program.statements) != 1:
+                self._raise(
+                    PARSE_INVALID_INTERPOLATION,
+                    "Invalid expression in string interpolation.",
+                    token.span,
+                )
+            statement = parsed.program.statements[0]
+            if not isinstance(statement, ExpressionStatement):
+                self._raise(
+                    PARSE_INVALID_INTERPOLATION,
+                    "Interpolation must contain one expression.",
+                    token.span,
+                )
+            parts.append(cast(Expression, self._relocate_node(statement.expression, token.span)))
+            index = end + 1
+        if literal:
+            parts.append("".join(literal))
+        if not had_escaped_brace and not any(isinstance(part, Expression) for part in parts):
+            return StringLiteral(span=token.span, value="".join(cast(str, part) for part in parts))
+        return InterpolatedString(span=token.span, parts=tuple(parts))
+
+    def _find_interpolation_end(self, value: str, start: int) -> int | None:
+        depth = 0
+        for index in range(start, len(value)):
+            if value[index] == "{":
+                depth += 1
+            elif value[index] == "}":
+                if depth == 0:
+                    return index
+                depth -= 1
+        return None
+
+    def _relocate_node(self, value: object, span: SourceSpan) -> object:
+        if isinstance(value, Node):
+            children = {
+                field.name: self._relocate_node(getattr(value, field.name), span)
+                for field in fields(value)
+                if field.name != "span"
+            }
+            return replace(value, span=span, **children)
+        if isinstance(value, tuple):
+            return tuple(self._relocate_node(item, span) for item in value)
+        return value
 
     def _looks_like_record_construction(self) -> bool:
         brace_index = self._index

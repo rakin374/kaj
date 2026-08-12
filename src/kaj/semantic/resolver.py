@@ -24,6 +24,7 @@ from kaj.ast import (
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
+    InterpolatedString,
     ListLiteral,
     MapLiteral,
     MatchStatement,
@@ -104,8 +105,9 @@ class Resolver:
         }
         builtin_scope = Scope(ScopeKind.MODULE) if self._include_builtins else None
         if builtin_scope is not None:
-            print_symbol = self._new_symbol("print", SymbolKind.BUILTIN_FUNCTION, program.span)
-            builtin_scope.declare(print_symbol)
+            for name in ("print", "range", "String", "utf8_encode", "utf8_decode"):
+                symbol = self._new_symbol(name, SymbolKind.BUILTIN_FUNCTION, program.span)
+                builtin_scope.declare(symbol)
         module_scope = Scope(ScopeKind.MODULE, builtin_scope)
 
         for statement in program.statements:
@@ -308,6 +310,10 @@ class Resolver:
             if expression.arguments is not None:
                 for enum_argument in expression.arguments:
                     self._resolve_expression(enum_argument.value, scope)
+        elif isinstance(expression, InterpolatedString):
+            for part in expression.parts:
+                if isinstance(part, Expression):
+                    self._resolve_expression(part, scope)
         elif isinstance(
             expression,
             (

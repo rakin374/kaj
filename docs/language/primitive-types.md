@@ -1210,7 +1210,8 @@ Thus:
 
 is invalid.
 
-Future explicit formatting/interpolation rules may perform intentional conversions.
+Current explicit formatting/interpolation rules perform intentional conversion through
+`String(value)` and interpolated display without changing ordinary assignment or operator typing.
 
 ---
 

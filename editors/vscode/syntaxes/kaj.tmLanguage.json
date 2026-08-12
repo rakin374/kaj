@@ -49,6 +49,20 @@
       },
       "patterns": [
         {
+          "name": "meta.interpolation.kaj",
+          "begin": "(?<!\\{)\\{(?!\\{)",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.kaj" }
+          },
+          "end": "(?<!\\})\\}(?!\\})",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.kaj" }
+          },
+          "patterns": [
+            { "include": "$self" }
+          ]
+        },
+        {
           "name": "constant.character.escape.kaj",
           "match": "\\\\(?:[\\\"nrt])"
         },

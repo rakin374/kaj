@@ -1,0 +1,16 @@
+newtype Sku = String
+type Item { sku: Sku name: String count: Int }
+
+let inventory: Map<Sku, Item> = {
+    Sku("A1"): Item { sku: Sku("A1"), name: "Notebook", count: 3 },
+    Sku("B2"): Item { sku: Sku("B2"), name: "Pen", count: 8 },
+}
+
+for entry in inventory {
+    print("{entry.key}: {entry.value}")
+}
+
+match inventory[Sku("A1")] {
+    some(item) => print(item.name)
+    none => print("missing")
+}

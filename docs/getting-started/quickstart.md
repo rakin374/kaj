@@ -43,6 +43,8 @@ for value in [1, 2, 3] {
 }
 ```
 
+Use `range(0, 5)` for lazy end-exclusive integer iteration. `break` exits the nearest loop and `continue` advances it.
+
 Conditions must be `Bool`; Kaj has no implicit truthiness.
 
 ## Lists and maps
@@ -60,6 +62,10 @@ match ages["Alice"] {
 ```
 
 Lists are homogeneous and zero-indexed. Map lookup returns `Optional<V>`, never a raw missing-key exception.
+
+Lists expose safe `.first` and `.last` optionals. Maps iterate in insertion order with `entry.key` and `entry.value`.
+
+Strings interpolate expressions with braces: `"Hello, {name}"`. Write `{{` or `}}` for literal braces. `String(42)` is explicit conversion.
 
 ## Records and enums
 

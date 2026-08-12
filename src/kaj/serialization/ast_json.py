@@ -36,6 +36,7 @@ from kaj.ast import (
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
+    InterpolatedString,
     ListLiteral,
     MapEntry,
     MapLiteral,
@@ -216,6 +217,19 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
         return _node("decimal_literal", {"value": value}, span)
     if isinstance(node, StringLiteral):
         return _node("string_literal", {"value": node.value}, span)
+    if isinstance(node, InterpolatedString):
+        return _node(
+            "interpolated_string",
+            {
+                "parts": [
+                    {"kind": "text", "value": part}
+                    if isinstance(part, str)
+                    else {"kind": "expression", "value": _encode_node(part)}
+                    for part in node.parts
+                ]
+            },
+            span,
+        )
     if isinstance(node, BooleanLiteral):
         return _node("boolean_literal", {"value": node.value}, span)
     if isinstance(node, NoneLiteral):
@@ -553,6 +567,35 @@ def _decode_decimal(obj: dict[str, object], path: JSONPath) -> Node:
 def _decode_string(obj: dict[str, object], path: JSONPath) -> Node:
     _check_node_fields(obj, {"value"}, path)
     return StringLiteral(span=_span_field(obj, path), value=_string_field(obj, "value", path))
+
+
+def _decode_interpolated_string(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"parts"}, path)
+    raw_parts_value = _required(obj, "parts", path)
+    if not isinstance(raw_parts_value, list):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "parts must be an array.", path + ("parts",))
+    raw_parts = raw_parts_value
+    parts: list[str | Expression] = []
+    for index, raw in enumerate(raw_parts):
+        part_path = path + ("parts", index)
+        part = _expect_object(raw, part_path)
+        _check_fields(part, {"kind", "value"}, part_path)
+        kind = _string_field(part, "kind", part_path)
+        if kind == "text":
+            parts.append(_string_field(part, "value", part_path))
+        elif kind == "expression":
+            decoded = _decode_node(_required(part, "value", part_path), part_path + ("value",))
+            if not isinstance(decoded, Expression):
+                raise ASTJSONError(
+                    ASTJSON_INVALID_FIELD, "Interpolation value must be an expression.", part_path
+                )
+            parts.append(decoded)
+        else:
+            raise ASTJSONError(
+                ASTJSON_INVALID_FIELD, "Interpolation part kind must be text or expression.",
+                part_path + ("kind",),
+            )
+    return InterpolatedString(span=_span_field(obj, path), parts=tuple(parts))
 
 
 def _decode_boolean(obj: dict[str, object], path: JSONPath) -> Node:
@@ -974,6 +1017,7 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "integer_literal": _decode_integer,
     "decimal_literal": _decode_decimal,
     "string_literal": _decode_string,
+    "interpolated_string": _decode_interpolated_string,
     "boolean_literal": _decode_boolean,
     "none_literal": _decode_none,
     "identifier": _decode_identifier,

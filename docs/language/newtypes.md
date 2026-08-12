@@ -626,11 +626,7 @@ which produces `Int`.
 
 # 26. Equality
 
-Newtype equality is not automatically defined merely because the underlying type supports equality.
-
-Checkpoint 14 does not introduce derived equality for newtypes.
-
-Do not inherit Python/runtime equality behavior.
+Checkpoint 23 defines newtype equality when the underlying type supports equality. Both operands must have the same nominal newtype; comparison recursively uses Kaj equality rather than Python equality.
 
 ---
 
@@ -650,15 +646,13 @@ Kaj conditions remain Bool-only.
 
 # 29. `print`
 
-The minimal `print` builtin does not need to print an entire newtype value directly.
-
-Programmers may print:
+`print` displays an entire newtype deterministically, for example `UserId("abc")`. Programmers may also explicitly print the underlying value:
 
 ```kaj
 id.value
 ```
 
-Do not broaden printing implicitly.
+Display does not imply implicit unwrapping or operator inheritance.
 
 ---
 

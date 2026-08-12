@@ -1,0 +1,5 @@
+import models
+import services.users
+
+let user: models.User = models.make("1", "Alice")
+print(services.users.describe(user))

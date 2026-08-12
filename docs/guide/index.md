@@ -26,3 +26,5 @@ The guide teaches current Kaj through runnable examples. For exact rules and dia
 
 - [Modules](modules.md)
 - [Kaj by Example](kaj-by-example.md)
+
+Normative additions: [loop control and ranges](../language/loop-control-and-ranges.md), [strings and conversion](../language/strings-and-conversion.md), and [equality and display](../language/equality-and-display.md).

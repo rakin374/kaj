@@ -889,11 +889,7 @@ fn is_complete(status: Status) -> Bool {
 
 # 43. Enum Equality
 
-Enum equality is deferred in Checkpoint 11.
-
-Do not automatically inherit Python equality behavior.
-
-Pattern matching is the primary enum inspection mechanism for now.
+Checkpoint 23 defines enum equality within the same nominal enum when every payload type supports equality. Tags and corresponding payloads are compared with Kaj equality. Different enum declarations remain incomparable. Pattern matching remains the primary decomposition mechanism.
 
 ---
 

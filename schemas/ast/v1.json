@@ -43,6 +43,7 @@
         { "$ref": "#/$defs/integerLiteral" },
         { "$ref": "#/$defs/decimalLiteral" },
         { "$ref": "#/$defs/stringLiteral" },
+        { "$ref": "#/$defs/interpolatedString" },
         { "$ref": "#/$defs/booleanLiteral" },
         { "$ref": "#/$defs/noneLiteral" },
         { "$ref": "#/$defs/identifier" },
@@ -134,6 +135,45 @@
           "properties": {
             "kind": { "const": "string_literal" },
             "value": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "interpolatedStringPart": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "text" },
+            "value": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "expression" },
+            "value": { "$ref": "#/$defs/expression" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "interpolatedString": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["parts"],
+          "properties": {
+            "kind": { "const": "interpolated_string" },
+            "parts": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/interpolatedStringPart" }
+            }
           }
         }
       ],

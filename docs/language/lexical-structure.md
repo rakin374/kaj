@@ -598,7 +598,8 @@ Multiline string syntax is deferred.
 
 ## 24. String Interpolation
 
-String interpolation is not lexically interpreted in Checkpoint 1.
+String interpolation is not split into multiple lexical tokens. The lexer still emits one `STRING`
+token; the parser interprets brace-delimited expressions under the current interpolation rules.
 
 ```kaj
 "Hello, {name}"

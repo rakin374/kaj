@@ -28,6 +28,7 @@ from kaj.ast import (
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
+    InterpolatedString,
     ListLiteral,
     MapLiteral,
     MatchCase,
@@ -62,12 +63,14 @@ from kaj.semantic.types import (
     FunctionParameterType,
     FunctionType,
     ListType,
+    MapEntryType,
     MapType,
     ModuleType,
     NewtypeDefinition,
     NewtypeType,
     OptionalType,
     PrimitiveType,
+    RangeType,
     RecordDefinition,
     RecordField,
     RecordType,
@@ -208,6 +211,7 @@ class TypeChecker:
         self._mapped_arguments: list[MappedArgument] = []
         self._diagnostics: list[Diagnostic] = []
         self._current_return_type: ValueType | None = None
+        self._loop_depth = 0
         self._record_types_by_name: dict[str, RecordType] = {}
         self._record_types_by_declaration: dict[int, RecordType] = {}
         self._record_definitions: list[RecordDefinition] = []
@@ -232,6 +236,7 @@ class TypeChecker:
         self._mapped_arguments = []
         self._diagnostics = []
         self._current_return_type = None
+        self._loop_depth = 0
         self._record_types_by_name = {}
         self._record_types_by_declaration = {}
         self._record_definitions = []
@@ -249,9 +254,16 @@ class TypeChecker:
         self._define_newtypes(program)
         self._define_records(program)
         self._define_enums(program)
+        builtin_types = {
+            "print": BuiltinFunctionType.PRINT,
+            "range": BuiltinFunctionType.RANGE,
+            "String": BuiltinFunctionType.STRING,
+            "utf8_encode": BuiltinFunctionType.UTF8_ENCODE,
+            "utf8_decode": BuiltinFunctionType.UTF8_DECODE,
+        }
         for symbol in self._resolution.symbols:
-            if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name == "print":
-                self._record_symbol(symbol, BuiltinFunctionType.PRINT)
+            if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name in builtin_types:
+                self._record_symbol(symbol, builtin_types[symbol.name])
         for statement in program.statements:
             if isinstance(statement, ImportDeclaration):
                 import_symbol = self._resolution.symbol_for_declaration(statement)
@@ -615,7 +627,11 @@ class TypeChecker:
                 self._check_statement(statement.else_branch)
         elif isinstance(statement, WhileStatement):
             self._check_condition(statement.condition)
-            self._check_block(statement.body)
+            self._loop_depth += 1
+            try:
+                self._check_block(statement.body)
+            finally:
+                self._loop_depth -= 1
         elif isinstance(statement, ForStatement):
             iterable_type = self._infer(statement.iterable)
             symbol = self._resolution.symbol_for_declaration(statement)
@@ -623,15 +639,29 @@ class TypeChecker:
                 if isinstance(iterable_type, ListType):
                     self._record_symbol(symbol, iterable_type.element_type)
                     self._mutable_symbols[symbol.id] = False
+                elif isinstance(iterable_type, RangeType):
+                    self._record_symbol(symbol, PrimitiveType.INT)
+                    self._mutable_symbols[symbol.id] = False
+                elif isinstance(iterable_type, MapType):
+                    self._record_symbol(
+                        symbol, MapEntryType(iterable_type.key_type, iterable_type.value_type)
+                    )
+                    self._mutable_symbols[symbol.id] = False
                 else:
                     self._record_symbol(symbol, PrimitiveType.ERROR)
-            if iterable_type is not PrimitiveType.ERROR and not isinstance(iterable_type, ListType):
+            if iterable_type is not PrimitiveType.ERROR and not isinstance(
+                iterable_type, (ListType, RangeType, MapType)
+            ):
                 self._diagnose(
                     "TYPE_NOT_ITERABLE",
                     f"Type {format_type(iterable_type)} is not iterable.",
                     statement.iterable.span,
                 )
-            self._check_block(statement.body)
+            self._loop_depth += 1
+            try:
+                self._check_block(statement.body)
+            finally:
+                self._loop_depth -= 1
         elif isinstance(statement, FunctionDeclaration):
             signature = self._function_types.get(id(statement))
             if signature is None:
@@ -666,8 +696,20 @@ class TypeChecker:
             self._check_return(statement)
         elif isinstance(statement, Block):
             self._check_block(statement)
-        elif isinstance(statement, (BreakStatement, ContinueStatement)):
-            return
+        elif isinstance(statement, BreakStatement):
+            if self._loop_depth == 0:
+                self._diagnose(
+                    "CONTROL_BREAK_OUTSIDE_LOOP",
+                    "'break' may only appear inside a loop.",
+                    statement.span,
+                )
+        elif isinstance(statement, ContinueStatement):
+            if self._loop_depth == 0:
+                self._diagnose(
+                    "CONTROL_CONTINUE_OUTSIDE_LOOP",
+                    "'continue' may only appear inside a loop.",
+                    statement.span,
+                )
         else:
             raise TypeError(f"Unsupported statement node: {type(statement).__name__}")
 
@@ -749,6 +791,17 @@ class TypeChecker:
             result = PrimitiveType.DECIMAL
         elif isinstance(expression, StringLiteral):
             result = PrimitiveType.STRING
+        elif isinstance(expression, InterpolatedString):
+            for part in expression.parts:
+                if isinstance(part, Expression):
+                    part_type = self._infer(part)
+                    if isinstance(part_type, (FunctionType, BuiltinFunctionType, ModuleType)):
+                        self._diagnose(
+                            "TYPE_INTERPOLATION_NOT_DISPLAYABLE",
+                            f"Cannot interpolate {format_type(part_type)}.",
+                            part.span,
+                        )
+            result = PrimitiveType.STRING
         elif isinstance(expression, NoneLiteral):
             result = expected if isinstance(expected, OptionalType) else PrimitiveType.NONE
         elif isinstance(expression, Identifier):
@@ -770,6 +823,8 @@ class TypeChecker:
             if isinstance(object_type, ListType):
                 if expression.member == "count":
                     result = PrimitiveType.INT
+                elif expression.member in {"first", "last"}:
+                    result = OptionalType(object_type.element_type)
                 else:
                     self._diagnose(
                         "TYPE_UNKNOWN_MEMBER",
@@ -784,6 +839,18 @@ class TypeChecker:
                     self._diagnose(
                         "TYPE_UNKNOWN_MEMBER",
                         f"Map has no member '{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
+            elif isinstance(object_type, MapEntryType):
+                if expression.member == "key":
+                    result = object_type.key_type
+                elif expression.member == "value":
+                    result = object_type.value_type
+                else:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_MEMBER",
+                        f"Map entry has no member '{expression.member}'.",
                         expression.span,
                     )
                     result = PrimitiveType.ERROR
@@ -1333,7 +1400,11 @@ class TypeChecker:
             if left is right is PrimitiveType.BOOL:
                 return PrimitiveType.BOOL
         elif operator in (BinaryOperator.EQUAL, BinaryOperator.NOT_EQUAL):
-            if (isinstance(left, PrimitiveType) and left is right) or both_numeric:
+            if (
+                ((isinstance(left, PrimitiveType) and left is right) or both_numeric)
+                and self._supports_equality(left)
+                and self._supports_equality(right)
+            ) or (left == right and self._supports_equality(left)):
                 return PrimitiveType.BOOL
         elif operator in (
             BinaryOperator.LESS,
@@ -1366,6 +1437,33 @@ class TypeChecker:
         )
         return PrimitiveType.ERROR
 
+    def _supports_equality(self, semantic_type: SemanticType) -> bool:
+        if semantic_type in {
+            PrimitiveType.BOOL,
+            PrimitiveType.INT,
+            PrimitiveType.DECIMAL,
+            PrimitiveType.STRING,
+            PrimitiveType.BYTES,
+            PrimitiveType.NONE,
+            PrimitiveType.ERROR,
+        }:
+            return True
+        if isinstance(semantic_type, OptionalType):
+            return self._supports_equality(semantic_type.value_type)
+        if isinstance(semantic_type, ResultType):
+            return self._supports_equality(semantic_type.ok_type) and self._supports_equality(
+                semantic_type.err_type
+            )
+        if isinstance(semantic_type, NewtypeType):
+            return self._supports_equality(self._newtype_definition(semantic_type).underlying_type)
+        if isinstance(semantic_type, EnumType):
+            return all(
+                self._supports_equality(field.type)
+                for variant in self._enum_definition(semantic_type).variants
+                for field in variant.payload
+            )
+        return False
+
     def _infer_call(
         self, expression: CallExpression, expected: SemanticType | None = None
     ) -> SemanticType:
@@ -1389,6 +1487,8 @@ class TypeChecker:
         if callee_type is BuiltinFunctionType.PRINT:
             argument_types = [self._infer(argument.value) for argument in expression.arguments]
             return self._infer_print_call(expression, argument_types)
+        if isinstance(callee_type, BuiltinFunctionType):
+            return self._infer_builtin_call(expression, callee_type)
         if not isinstance(callee_type, FunctionType):
             for argument in expression.arguments:
                 self._infer(argument.value)
@@ -1462,6 +1562,64 @@ class TypeChecker:
                 expression.span,
             )
         return callee_type.return_type
+
+    def _infer_builtin_call(
+        self, expression: CallExpression, builtin: BuiltinFunctionType
+    ) -> SemanticType:
+        expected_arity = 2 if builtin is BuiltinFunctionType.RANGE else 1
+        argument_types = [self._infer(argument.value) for argument in expression.arguments]
+        if any(argument.name is not None for argument in expression.arguments):
+            for argument in expression.arguments:
+                if argument.name is not None:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_NAMED_ARGUMENT",
+                        f"Builtin '{builtin.value}' does not accept named arguments.",
+                        argument.span,
+                    )
+        if len(argument_types) < expected_arity:
+            self._diagnose(
+                "TYPE_MISSING_ARGUMENT",
+                f"Builtin '{builtin.value}' expects {expected_arity} argument(s).",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        if len(argument_types) > expected_arity:
+            self._diagnose(
+                "TYPE_TOO_MANY_ARGUMENTS",
+                f"Builtin '{builtin.value}' expects {expected_arity} argument(s).",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        if builtin is BuiltinFunctionType.RANGE:
+            for argument, argument_type in zip(expression.arguments, argument_types, strict=True):
+                if argument_type not in (PrimitiveType.INT, PrimitiveType.ERROR):
+                    self._diagnose(
+                        "TYPE_MISMATCH", "range bounds must be Int.", argument.value.span
+                    )
+            return RangeType()
+        if builtin is BuiltinFunctionType.STRING:
+            allowed = {
+                PrimitiveType.BOOL,
+                PrimitiveType.INT,
+                PrimitiveType.DECIMAL,
+                PrimitiveType.STRING,
+            }
+            if argument_types[0] not in allowed and argument_types[0] is not PrimitiveType.ERROR:
+                self._diagnose(
+                    "TYPE_MISMATCH",
+                    f"String conversion does not support {format_type(argument_types[0])}.",
+                    expression.arguments[0].value.span,
+                )
+            return PrimitiveType.STRING
+        if builtin is BuiltinFunctionType.UTF8_ENCODE:
+            if argument_types[0] not in (PrimitiveType.STRING, PrimitiveType.ERROR):
+                self._diagnose("TYPE_MISMATCH", "utf8_encode expects String.", expression.span)
+            return PrimitiveType.BYTES
+        if builtin is BuiltinFunctionType.UTF8_DECODE:
+            if argument_types[0] not in (PrimitiveType.BYTES, PrimitiveType.ERROR):
+                self._diagnose("TYPE_MISMATCH", "utf8_decode expects Bytes.", expression.span)
+            return ResultType(PrimitiveType.STRING, PrimitiveType.STRING)
+        raise AssertionError(f"Unhandled builtin {builtin}")
 
     def _lookup_type_name(self, name: str) -> ValueType | None:
         local = (
@@ -1598,22 +1756,14 @@ class TypeChecker:
                 "Builtin 'print' accepts exactly one argument.",
                 expression.span,
             )
-        if argument_types:
-            printable = {
-                PrimitiveType.BOOL,
-                PrimitiveType.INT,
-                PrimitiveType.DECIMAL,
-                PrimitiveType.STRING,
-                PrimitiveType.BYTES,
-                PrimitiveType.NONE,
-                PrimitiveType.ERROR,
-            }
-            if argument_types[0] not in printable:
-                self._diagnose(
-                    "TYPE_MISMATCH",
-                    f"Builtin 'print' cannot print {format_type(argument_types[0])}.",
-                    expression.arguments[0].value.span,
-                )
+        if argument_types and isinstance(
+            argument_types[0], (FunctionType, BuiltinFunctionType, ModuleType)
+        ):
+            self._diagnose(
+                "TYPE_MISMATCH",
+                f"Builtin 'print' cannot print {format_type(argument_types[0])}.",
+                expression.arguments[0].value.span,
+            )
         return PrimitiveType.NONE
 
     def _check_return(self, statement: ReturnStatement) -> None:

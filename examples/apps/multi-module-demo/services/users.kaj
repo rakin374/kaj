@@ -1,0 +1,8 @@
+import models
+
+fn describe(user: models.User) -> String {
+    match user.status {
+        active => return "{user.name} is active"
+        suspended(reason) => return "{user.name}: {reason}"
+    }
+}

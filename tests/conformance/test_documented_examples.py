@@ -8,9 +8,9 @@ import pytest
 from kaj.cli import EXIT_SUCCESS, cli_main
 
 EXAMPLES = Path(__file__).parents[2] / "examples"
-ENTRY_EXAMPLES = tuple(
-    path for path in sorted(EXAMPLES.rglob("*.kaj")) if path.name != "math.kaj"
-)
+ENTRY_EXAMPLES = tuple(sorted(EXAMPLES.glob("*.kaj"))) + (
+    EXAMPLES / "modules" / "main.kaj",
+) + tuple(sorted((EXAMPLES / "apps").glob("**/main.kaj")))
 
 
 def invoke(command: str, path: Path) -> tuple[int, str, str]:

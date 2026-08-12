@@ -28,6 +28,17 @@ class MapType:
 
 
 @dataclass(frozen=True)
+class RangeType:
+    pass
+
+
+@dataclass(frozen=True)
+class MapEntryType:
+    key_type: ValueType
+    value_type: ValueType
+
+
+@dataclass(frozen=True)
 class TypeSymbol:
     id: int
     name: str
@@ -64,6 +75,8 @@ type ValueType = (
     PrimitiveType
     | ListType
     | MapType
+    | RangeType
+    | MapEntryType
     | RecordType
     | EnumType
     | NewtypeType
@@ -137,6 +150,10 @@ class FunctionType:
 
 class BuiltinFunctionType(Enum):
     PRINT = "print"
+    RANGE = "range"
+    STRING = "String"
+    UTF8_ENCODE = "utf8_encode"
+    UTF8_DECODE = "utf8_decode"
 
 
 type SemanticType = ValueType | FunctionType | BuiltinFunctionType | ModuleType
@@ -167,6 +184,13 @@ def format_type(semantic_type: SemanticType) -> str:
     if isinstance(semantic_type, MapType):
         return (
             f"Map<{format_type(semantic_type.key_type)}, {format_type(semantic_type.value_type)}>"
+        )
+    if isinstance(semantic_type, RangeType):
+        return "Range"
+    if isinstance(semantic_type, MapEntryType):
+        return (
+            f"MapEntry<{format_type(semantic_type.key_type)}, "
+            f"{format_type(semantic_type.value_type)}>"
         )
     if isinstance(semantic_type, OptionalType):
         return f"Optional<{format_type(semantic_type.value_type)}>"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException, localcontext
 from typing import Never, cast
@@ -28,6 +29,7 @@ from kaj.ast import (
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
+    InterpolatedString,
     ListLiteral,
     MapLiteral,
     MatchStatement,
@@ -53,11 +55,14 @@ from kaj.runtime.values import (
     KajFunction,
     KajList,
     KajMap,
+    KajMapEntry,
     KajMapKey,
     KajModuleValue,
     KajNewtypeValue,
+    KajRange,
     KajRecord,
     RuntimeValue,
+    decode_utf8,
 )
 from kaj.semantic import (
     EnumType,
@@ -90,6 +95,14 @@ class _ReturnSignal(Exception):
     def __init__(self, value: RuntimeValue, source_type: SemanticType) -> None:
         self.value = value
         self.source_type = source_type
+
+
+class _BreakSignal(Exception):
+    pass
+
+
+class _ContinueSignal(Exception):
+    pass
 
 
 class Interpreter:
@@ -165,9 +178,16 @@ class Interpreter:
         self._output.write_line(text)
 
     def _install_builtins(self, environment: Environment) -> None:
+        builtins = {
+            "print": BuiltinFunction.PRINT,
+            "range": BuiltinFunction.RANGE,
+            "String": BuiltinFunction.STRING,
+            "utf8_encode": BuiltinFunction.UTF8_ENCODE,
+            "utf8_decode": BuiltinFunction.UTF8_DECODE,
+        }
         for symbol in self._resolution.symbols:
-            if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name == "print":
-                environment.define(symbol, BuiltinFunction.PRINT, mutable=False)
+            if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name in builtins:
+                environment.define(symbol, builtins[symbol.name], mutable=False)
 
     def _install_functions(self, program: Program, environment: Environment) -> None:
         for statement in program.statements:
@@ -228,22 +248,42 @@ class Interpreter:
                 self._require_bool(condition, statement.condition.span)
                 if condition is False:
                     break
-                self._execute_block(statement.body, Environment(environment))
+                try:
+                    self._execute_block(statement.body, Environment(environment))
+                except _ContinueSignal:
+                    continue
+                except _BreakSignal:
+                    break
         elif isinstance(statement, ForStatement):
             iterable = self._evaluate(statement.iterable, environment)
-            if not isinstance(iterable, KajList):
+            elements: Iterable[RuntimeValue]
+            if isinstance(iterable, KajList):
+                elements = iterable.elements
+            elif isinstance(iterable, KajRange):
+                elements = range(iterable.start, iterable.end)
+            elif isinstance(iterable, KajMap):
+                elements = tuple(
+                    KajMapEntry(self._map_key_value(key), value)
+                    for key, value in iterable.entries
+                )
+            else:
                 self._fail(
                     "RUNTIME_INVALID_OPERATION",
-                    "For iterable is not a Kaj List.",
+                    "For value is not iterable.",
                     statement.iterable.span,
                 )
             symbol = self._resolution.symbol_for_declaration(statement)
             if symbol is None:
                 self._fail("RUNTIME_INTERNAL_ERROR", "Loop variable has no symbol.", statement.span)
-            for element in iterable.elements:
+            for element in elements:
                 iteration_environment = Environment(environment)
                 iteration_environment.define(symbol, element, mutable=False)
-                self._execute_block(statement.body, iteration_environment)
+                try:
+                    self._execute_block(statement.body, iteration_environment)
+                except _ContinueSignal:
+                    continue
+                except _BreakSignal:
+                    break
         elif isinstance(statement, ReturnStatement):
             if statement.value is None:
                 raise _ReturnSignal(None, PrimitiveType.NONE)
@@ -305,12 +345,10 @@ class Interpreter:
             ),
         ):
             return
-        elif isinstance(statement, (BreakStatement, ContinueStatement)):
-            self._fail(
-                "RUNTIME_INVALID_OPERATION",
-                f"{type(statement).__name__} is not executable in Checkpoint 8.",
-                statement.span,
-            )
+        elif isinstance(statement, BreakStatement):
+            raise _BreakSignal
+        elif isinstance(statement, ContinueStatement):
+            raise _ContinueSignal
         else:
             self._fail(
                 "RUNTIME_INVALID_OPERATION",
@@ -372,6 +410,13 @@ class Interpreter:
             return expression.value
         if isinstance(expression, StringLiteral):
             return expression.value
+        if isinstance(expression, InterpolatedString):
+            return "".join(
+                part
+                if isinstance(part, str)
+                else self._format_value(self._evaluate(part, environment))
+                for part in expression.parts
+            )
         if isinstance(expression, NoneLiteral):
             semantic_type = self._expression_type(expression)
             if isinstance(semantic_type, OptionalType):
@@ -542,10 +587,23 @@ class Interpreter:
             object_value = self._evaluate(expression.object, environment)
             if isinstance(object_value, KajList) and expression.member == "count":
                 return len(object_value.elements)
+            if isinstance(object_value, KajList) and expression.member in {"first", "last"}:
+                edge_type = self._expression_type(expression)
+                if not isinstance(edge_type, OptionalType):
+                    self._fail("RUNTIME_INTERNAL_ERROR", "List edge has invalid type.", expression.span)
+                if not object_value.elements:
+                    return KajEnumValue(edge_type, "none", ())
+                index = 0 if expression.member == "first" else -1
+                return KajEnumValue(edge_type, "some", (object_value.elements[index],))
             if isinstance(object_value, KajMap) and expression.member == "count":
                 return len(object_value.entries)
             if isinstance(object_value, KajNewtypeValue) and expression.member == "value":
                 return object_value.value
+            if isinstance(object_value, KajMapEntry):
+                if expression.member == "key":
+                    return object_value.key
+                if expression.member == "value":
+                    return object_value.value
             if isinstance(object_value, KajModuleValue):
                 try:
                     return object_value.read(expression.member)
@@ -663,9 +721,9 @@ class Interpreter:
                 if operator is BinaryOperator.POWER:
                     return left**right  # type: ignore[operator]
                 if operator is BinaryOperator.EQUAL:
-                    return left == right
+                    return self._kaj_equal(left, right)
                 if operator is BinaryOperator.NOT_EQUAL:
-                    return left != right
+                    return not self._kaj_equal(left, right)
                 if operator is BinaryOperator.LESS:
                     return left < right  # type: ignore[operator]
                 if operator is BinaryOperator.LESS_EQUAL:
@@ -726,6 +784,25 @@ class Interpreter:
                 )
             self._emit(self._format_value(values[0]))
             return None
+        if callee is BuiltinFunction.RANGE:
+            if len(values) != 2 or any(type(value) is not int for value in values):
+                self._fail("RUNTIME_INTERNAL_ERROR", "range received invalid arguments.", expression.span)
+            return KajRange(cast(int, values[0]), cast(int, values[1]))
+        if callee is BuiltinFunction.STRING:
+            if len(values) != 1:
+                self._fail("RUNTIME_INTERNAL_ERROR", "String received invalid arity.", expression.span)
+            return self._format_value(values[0])
+        if callee is BuiltinFunction.UTF8_ENCODE:
+            if len(values) != 1 or not isinstance(values[0], str):
+                self._fail("RUNTIME_INTERNAL_ERROR", "utf8_encode received invalid input.", expression.span)
+            return values[0].encode("utf-8")
+        if callee is BuiltinFunction.UTF8_DECODE:
+            if len(values) != 1 or not isinstance(values[0], bytes):
+                self._fail("RUNTIME_INTERNAL_ERROR", "utf8_decode received invalid input.", expression.span)
+            result_type = self._expression_type(expression)
+            if not isinstance(result_type, ResultType):
+                self._fail("RUNTIME_INTERNAL_ERROR", "utf8_decode has invalid type.", expression.span)
+            return decode_utf8(values[0], result_type)
         if not isinstance(callee, KajFunction):
             self._fail("RUNTIME_INVALID_OPERATION", "Value is not callable.", expression.span)
         call_environment = Environment(callee.environment)
@@ -851,6 +928,18 @@ class Interpreter:
             self._fail("RUNTIME_INTERNAL_ERROR", "Map key does not match its static type.", span)
         return KajMapKey(key_type, cast(bool | int | Decimal | str | bytes, value))
 
+    def _map_key_value(self, key: KajMapKey) -> RuntimeValue:
+        if isinstance(key.type, NewtypeType):
+            nested = key.value
+            if not isinstance(nested, KajMapKey):
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Newtype map key has invalid representation.",
+                    key.type.symbol.declaration_span,
+                )
+            return KajNewtypeValue(key.type, self._map_key_value(nested))
+        return cast(RuntimeValue, key.value)
+
     def _expression_type(self, expression: Expression) -> SemanticType:
         semantic_type = self._types.type_of_expression(expression)
         if semantic_type is None:
@@ -890,8 +979,82 @@ class Interpreter:
         if isinstance(value, str):
             return value
         if isinstance(value, bytes):
-            return repr(value)
+            return f'bytes("{value.hex()}")'
+        if isinstance(value, KajList):
+            return "[" + ", ".join(self._format_nested(item) for item in value.elements) + "]"
+        if isinstance(value, KajMap):
+            return "{" + ", ".join(
+                f"{self._format_nested(self._map_key_value(key))}: {self._format_nested(item)}"
+                for key, item in value.entries
+            ) + "}"
+        if isinstance(value, KajEnumValue):
+            if isinstance(value.type, (OptionalType, ResultType)):
+                name = value.variant
+            else:
+                name = f"{value.type.symbol.name}.{value.variant}"
+            if not value.payload:
+                return name
+            if isinstance(value.type, EnumType):
+                definition = self._types.enum_definition(value.type)
+                variant = (
+                    None
+                    if definition is None
+                    else next(
+                        (item for item in definition.variants if item.name == value.variant), None
+                    )
+                )
+                if variant is not None:
+                    payload = ", ".join(
+                        f"{field.name}: {self._format_nested(item)}"
+                        for field, item in zip(variant.payload, value.payload, strict=True)
+                    )
+                    return name + "(" + payload + ")"
+            return name + "(" + ", ".join(self._format_nested(item) for item in value.payload) + ")"
+        if isinstance(value, KajNewtypeValue):
+            return f"{value.type.symbol.name}({self._format_nested(value.value)})"
+        if isinstance(value, KajRecord):
+            fields = ", ".join(
+                f"{name}: {self._format_nested(item)}" for name, item in value.fields
+            )
+            return f"{value.type.symbol.name} {{ {fields} }}"
+        if isinstance(value, KajRange):
+            return f"range({value.start}, {value.end})"
+        if isinstance(value, KajMapEntry):
+            return (
+                f"MapEntry {{ key: {self._format_nested(value.key)}, "
+                f"value: {self._format_nested(value.value)} }}"
+            )
         return f"<{type(value).__name__}>"
+
+    def _format_nested(self, value: RuntimeValue) -> str:
+        if isinstance(value, str):
+            escaped = (
+                value.replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+            )
+            return f'"{escaped}"'
+        return self._format_value(value)
+
+    def _kaj_equal(self, left: RuntimeValue, right: RuntimeValue) -> bool:
+        if type(left) is not type(right):
+            if isinstance(left, (int, Decimal)) and not isinstance(left, bool) and isinstance(
+                right, (int, Decimal)
+            ) and not isinstance(right, bool):
+                return Decimal(left) == Decimal(right)
+            return False
+        if isinstance(left, KajEnumValue) and isinstance(right, KajEnumValue):
+            return (
+                left.type == right.type
+                and left.variant == right.variant
+                and len(left.payload) == len(right.payload)
+                and all(self._kaj_equal(a, b) for a, b in zip(left.payload, right.payload, strict=True))
+            )
+        if isinstance(left, KajNewtypeValue) and isinstance(right, KajNewtypeValue):
+            return left.type == right.type and self._kaj_equal(left.value, right.value)
+        return left == right
 
     def _fail(self, code: str, message: str, span: SourceSpan) -> Never:
         raise RuntimeFailure(RuntimeErrorInfo(code, message, span))

@@ -4,6 +4,10 @@
 **Scope:** Pure Kaj Core AST as implemented through Checkpoint 3  
 **Audience:** Compiler implementers, tooling authors, agents, IDE integrations, tests
 
+## Interpolated strings
+
+An interpolated string uses kind `interpolated_string` with ordered `parts`. A part is either `{"kind":"text","value":"..."}` or `{"kind":"expression","value":<expression node>}`. Semantic types, resolved symbols, and runtime-rendered text are not serialized. Ordinary strings remain `string_literal` nodes.
+
 ---
 
 ## 1. Purpose

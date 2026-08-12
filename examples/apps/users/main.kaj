@@ -1,0 +1,15 @@
+newtype UserId = String
+enum Status { active suspended(reason: String) }
+type User { id: UserId name: String status: Status }
+
+let users = [
+    User { id: UserId("1"), name: "Alice", status: Status.active },
+    User { id: UserId("2"), name: "Bob", status: Status.suspended(reason: "review") },
+]
+
+for user in users {
+    match user.status {
+        active => print("{user.name} is active")
+        suspended(reason) => print("{user.name}: {reason}")
+    }
+}

@@ -3,6 +3,8 @@
 **Status:** Authoritative for Kaj v0 Checkpoint 8  
 **Scope:** Reference execution of primitive literals, bindings, assignment, operators, `if`, `while`, functions, calls, and `return`  
 **Implementation:** Python reference interpreter  
+
+**Current extensions:** `break` and `continue` use control-flow signals consumed by the nearest loop. `range` uses lazy `KajRange`; map iteration yields controlled `KajMapEntry` values. Structured display and equality are Kaj-defined and do not delegate to Python representation or identity.
 **Not covered:** lists/maps execution, records, enums, Optional/Result, imports, effects/capabilities, concurrency, native code generation
 
 ---
@@ -711,20 +713,14 @@ This ensures block-local bindings do not become module/function locals across it
 
 # 33. Break and Continue
 
-Although the parser/AST may already support:
+The interpreter supports:
 
 ```text
 break
 continue
 ```
 
-they are not required by the user's Checkpoint 8 execution scope.
-
-For strict checkpoint discipline, do not expand runtime implementation to them unless the existing implementation structure makes them trivial and tests clearly isolate them.
-
-They may be implemented in a later control-flow completeness checkpoint.
-
-The Checkpoint 8 acceptance test does not depend on them.
+with dedicated internal control-flow signals. A loop consumes its own break/continue signals; return signals continue through the loop to function-call execution. Static checking rejects loop control outside a loop.
 
 ---
 
@@ -1665,7 +1661,7 @@ Checkpoint 8 is complete when:
 [ ] explicit host builtin scope introduced
 [ ] print resolves as builtin
 [ ] print type checking supported narrowly
-[ ] print accepts one primitive value
+[x] print accepts one Kaj-displayable value, including controlled structured values
 [ ] print returns None
 [ ] output sink is testable/capturable
 [ ] print formatting deterministic

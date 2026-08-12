@@ -1,5 +1,7 @@
 # Kaj Optional and Result
 
+> **Current equality/display:** `Optional` and `Result` values support equality when their payload types do. Equality compares the tag and payload. Both have deterministic `some(...)`/`none` and `ok(...)`/`err(...)` display.
+
 **Status:** Authoritative for Kaj v0 `Optional<T>` and `Result<T, E>` semantics  
 **Scope:** language-standard tagged types, construction, typing, matching, and runtime behavior  
 **Not covered:** `?`, automatic propagation, unwrap operators, combinators, error conversions, generic user-defined enums

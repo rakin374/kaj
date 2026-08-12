@@ -1,8 +1,10 @@
 # Kaj Lists
 
 **Status:** Authoritative for Kaj v0 Checkpoint 9  
-**Scope:** `List<T>`, list literals, index access, `count`, and `for` iteration  
+**Scope:** `List<T>`, list literals, index access, `count`, `first`, `last`, and `for` iteration
 **Not covered:** list mutation APIs, slicing, comprehensions, iterators as first-class values, maps, tuples, records
+
+`List<T>.first` and `.last` return `Optional<T>`. Empty lists return `none`; non-empty lists return `some(value)`.
 
 ---
 
@@ -701,11 +703,7 @@ The existing return-control mechanism must propagate through loop execution.
 
 # 29. Break / Continue
 
-Checkpoint 9 does not require `break` or `continue` runtime semantics unless they have already been separately implemented.
-
-Do not expand the checkpoint solely to support them.
-
-`for` iteration itself is required.
+Checkpoint 19 implements `break` and `continue` for list loops and all other supported loops. Each targets the nearest enclosing loop.
 
 ---
 
@@ -890,21 +888,13 @@ Conditions still require `Bool`.
 
 # 38. `print` and Lists
 
-The minimal Checkpoint 8 `print` builtin accepted primitive values only.
-
-Checkpoint 9 does **not** need to make entire lists printable.
-
-The acceptance case prints each element, not the list itself.
-
-Therefore:
+Checkpoint 23 extends deterministic display to entire lists. Therefore:
 
 ```kaj
 print(values)
 ```
 
-may remain unsupported unless explicitly extended.
-
-Do not broaden `print` generically just because List exists.
+prints a deterministic bracketed representation, recursively using Kaj display for elements.
 
 ---
 

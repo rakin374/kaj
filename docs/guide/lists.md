@@ -6,6 +6,13 @@ print(values[0])
 print(values.count)
 ```
 
+Safe edge access returns `Optional<T>`:
+
+```kaj
+match values.first { some(value) => print(value) none => print("empty") }
+match values.last { some(value) => print(value) none => print("empty") }
+```
+
 A list is homogeneous and uses zero-based indexing. Negative or out-of-range indices report `RUNTIME_INDEX_OUT_OF_BOUNDS`.
 
 An empty list needs context:

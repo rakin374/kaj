@@ -28,4 +28,6 @@ let outcome: Result<Int, String> = ok(42)
 
 Containers are invariant. Records, enums, and newtypes are nominal: two declarations with the same shape or underlying type remain different types.
 
+Use `String(value)` for explicit primitive-to-string conversion. `utf8_encode` and `utf8_decode` cross the `String`/`Bytes` boundary explicitly; decoding returns `Result<String, String>`.
+
 References: [primitive types](../language/primitive-types.md), [lists](../language/lists.md), [maps](../language/maps.md), [records](../language/records.md), [enums](../language/enums-and-match.md), and [newtypes](../language/newtypes.md).

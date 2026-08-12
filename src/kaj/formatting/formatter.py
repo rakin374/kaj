@@ -29,6 +29,7 @@ from kaj.ast import (
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
+    InterpolatedString,
     ListLiteral,
     MapLiteral,
     MatchStatement,
@@ -281,6 +282,8 @@ class _Formatter:
             text = self.decimal(expression.value)
         elif isinstance(expression, StringLiteral):
             text = self.string(expression.value)
+        elif isinstance(expression, InterpolatedString):
+            text = self.interpolated_string(expression)
         elif isinstance(expression, BooleanLiteral):
             text = "true" if expression.value else "false"
         elif isinstance(expression, NoneLiteral):
@@ -411,3 +414,13 @@ class _Formatter:
             .replace("\t", "\\t")
         )
         return '"' + escaped + '"'
+
+    def interpolated_string(self, expression: InterpolatedString) -> str:
+        parts: list[str] = []
+        for part in expression.parts:
+            if isinstance(part, str):
+                escaped = self.string(part)[1:-1]
+                parts.append(escaped.replace("{", "{{").replace("}", "}}"))
+            else:
+                parts.append("{" + self.expression(part) + "}")
+        return '"' + "".join(parts) + '"'

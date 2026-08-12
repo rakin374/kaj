@@ -20,6 +20,11 @@ class StringLiteral(Expression):
 
 
 @dataclass(frozen=True)
+class InterpolatedString(Expression):
+    parts: tuple[str | Expression, ...]
+
+
+@dataclass(frozen=True)
 class BooleanLiteral(Expression):
     value: bool
 

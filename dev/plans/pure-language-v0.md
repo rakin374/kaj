@@ -9,8 +9,8 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 18 — Pure Language Test Suite
-**Status:** Complete — pure-language core ready for agentic work
+**Current checkpoint:** Checkpoint 24 — Pure Language Hardening
+**Status:** Complete — pure-language core frozen for agentic work
 
 ## Completed
 
@@ -88,7 +88,7 @@
 - Optional/Result matching through the shared tagged-value exhaustiveness, pattern-scope,
   definite-return, and interpreter machinery, with explicit runtime type/tag identity.
 - Invariant `Map<K,V>` types, contextual and inferred map literals, restricted stable key types,
-  safe lookup as `Optional<V>`, and `count` without mutation or iteration semantics.
+  safe lookup as `Optional<V>`, `count`, and later insertion-ordered iteration without mutation.
 - Controlled immutable `KajMap` runtime values with typed keys, exact Decimal behavior,
   source-order evaluation, contextual promotion, and duplicate evaluated-key rejection.
 - Nominal newtype declarations with shared type-namespace predeclaration, recursive-cycle
@@ -117,8 +117,18 @@
   typing, formatting, runtime, CLI, and modules, with all prior checkpoint tests retained.
 - A complete user-facing documentation path from installation and quickstart through focused
   feature guides, backed by an executable example corpus and strict MkDocs validation.
-- An explicit host builtin scope containing only narrowly typed `print`, with deterministic
-  primitive formatting and an injectable output sink.
+- Executable nearest-loop `break`/`continue`, compile-time outside-loop diagnostics, and lazy,
+  ascending, end-exclusive integer ranges.
+- Expression interpolation with escaped braces, explicit primitive `String` conversion, and an
+  explicit UTF-8 `String`/`Bytes` boundary whose decoding result is typed.
+- Safe list `first`/`last` optionals and insertion-ordered map iteration through immutable,
+  compiler-owned key/value entry values.
+- Nominal equality for Optional, Result, enums, and newtypes plus deterministic Kaj-defined
+  structured display without Python `repr`, truthiness, collection, or identity leakage.
+- Checkpoint 24 dogfood applications, extended diagnostic inventory, formatter/AST JSON coverage,
+  updated VS Code interpolation support, and current user/reference documentation.
+- An explicit host builtin scope containing narrowly typed printing, ranges, string conversion,
+  and UTF-8 conversion, with deterministic structured formatting and an injectable output sink.
 - Structured runtime failures for division by zero, invalid operations, and internal-state errors,
   plus conformance coverage including the factorial acceptance program.
 - Recursive semantic `List<T>` types with exact generic arity validation, homogeneous literal
@@ -265,8 +275,8 @@
   parameter binding; every invocation receives a fresh call environment.
 - Approved `Int` to `Decimal` conversions are materialized at binding, assignment, argument, and
   return boundaries, as well as mixed numeric operations.
-- Unsupported collections, indexing, member access, `for`, `break`, and `continue` fail with a
-  structured runtime error rather than acquiring accidental Python semantics.
+- Unsupported operations fail with structured Kaj errors rather than acquiring accidental Python
+  semantics; later checkpoints explicitly add list/map iteration and loop control.
 - Runtime errors terminate execution and are returned as `RuntimeErrorInfo`; expected failures do
   not expose host exceptions.
 
@@ -2448,6 +2458,8 @@ modules
 ```
 
 For every invalid construct, assert the stable diagnostic code.
+
+
 
 ---
 
