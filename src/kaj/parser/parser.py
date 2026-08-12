@@ -32,6 +32,7 @@ from kaj.ast import (
     GenericType,
     Identifier,
     IfStatement,
+    ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     ListLiteral,
@@ -41,6 +42,7 @@ from kaj.ast import (
     MatchStatement,
     MemberAccessExpression,
     NamedType,
+    NewtypeDeclaration,
     NoneLiteral,
     Parameter,
     PatternBinding,
@@ -59,7 +61,7 @@ from kaj.ast import (
 )
 from kaj.diagnostics import Diagnostic
 from kaj.lexer import Token, TokenKind
-from kaj.source import SourceSpan
+from kaj.source import SourceLocation, SourceSpan
 
 PARSE_EXPECTED_EXPRESSION = "PARSE_EXPECTED_EXPRESSION"
 PARSE_EXPECTED_IDENTIFIER = "PARSE_EXPECTED_IDENTIFIER"
@@ -107,6 +109,7 @@ STATEMENT_STARTS = {
     TokenKind.FN,
     TokenKind.TYPE,
     TokenKind.ENUM,
+    TokenKind.NEWTYPE,
     TokenKind.IF,
     TokenKind.WHILE,
     TokenKind.FOR,
@@ -114,12 +117,11 @@ STATEMENT_STARTS = {
     TokenKind.CONTINUE,
     TokenKind.RETURN,
     TokenKind.MATCH,
+    TokenKind.IMPORT,
 }
 
 DEFERRED_STATEMENT_KEYWORDS = {
-    TokenKind.NEWTYPE,
     TokenKind.MATCH,
-    TokenKind.IMPORT,
 }
 
 
@@ -183,6 +185,10 @@ class Parser:
             return self._parse_record_declaration(self._previous())
         if self._match(TokenKind.ENUM):
             return self._parse_enum_declaration(self._previous())
+        if self._match(TokenKind.NEWTYPE):
+            return self._parse_newtype_declaration(self._previous())
+        if self._match(TokenKind.IMPORT):
+            return self._parse_import_declaration(self._previous())
         if self._match(TokenKind.IF):
             return self._parse_if(self._previous())
         if self._match(TokenKind.WHILE):
@@ -315,13 +321,13 @@ class Parser:
                     type_annotation=annotation,
                 )
             )
-        end = self._consume(
+        close = self._consume(
             TokenKind.RIGHT_BRACE,
             PARSE_EXPECTED_TOKEN,
             "Expected '}' after record fields.",
         )
         return RecordDeclaration(
-            span=SourceSpan(start.span.start, end.span.end),
+            span=SourceSpan(start.span.start, close.span.end),
             name=name.lexeme,
             fields=tuple(fields),
         )
@@ -380,6 +386,38 @@ class Parser:
             SourceSpan(start.span.start, close.span.end), name.lexeme, tuple(variants)
         )
 
+    def _parse_newtype_declaration(self, start: Token) -> NewtypeDeclaration:
+        name = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a newtype name.",
+        )
+        self._consume(TokenKind.EQUAL, PARSE_EXPECTED_TOKEN, "Expected '=' after newtype name.")
+        underlying = self._parse_type_expression()
+        return NewtypeDeclaration(
+            span=SourceSpan(start.span.start, underlying.span.end),
+            name=name.lexeme,
+            underlying_type=underlying,
+        )
+
+    def _parse_import_declaration(self, start: Token) -> ImportDeclaration:
+        first = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a module name after 'import'.",
+        )
+        parts = [first.lexeme]
+        end = first.span.end
+        while self._match(TokenKind.DOT):
+            part = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected a module path segment after '.'.",
+            )
+            parts.append(part.lexeme)
+            end = part.span.end
+        return ImportDeclaration(SourceSpan(start.span.start, end), tuple(parts))
+
     def _parse_match(self, start: Token) -> MatchStatement:
         scrutinee = self._parse_control_condition()
         self._consume(
@@ -436,20 +474,30 @@ class Parser:
             PARSE_EXPECTED_TYPE,
             "Expected a type name.",
         )
-        named = NamedType(span=name.span, name=name.lexeme)
+        parts = [name.lexeme]
+        end = name.span.end
+        while self._match(TokenKind.DOT):
+            part = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_TYPE,
+                "Expected a type name after '.'.",
+            )
+            parts.append(part.lexeme)
+            end = part.span.end
+        named = NamedType(span=SourceSpan(name.span.start, end), name=".".join(parts))
         if not self._match(TokenKind.LESS):
             return named
 
         arguments = [self._parse_type_expression()]
         while self._match(TokenKind.COMMA):
             arguments.append(self._parse_type_expression())
-        end = self._consume(
+        close = self._consume(
             TokenKind.GREATER,
             PARSE_EXPECTED_TOKEN,
             "Expected '>' after generic type arguments.",
         )
         return GenericType(
-            span=SourceSpan(named.span.start, end.span.end),
+            span=SourceSpan(named.span.start, close.span.end),
             base=named,
             arguments=tuple(arguments),
         )
@@ -644,10 +692,14 @@ class Parser:
                     PARSE_EXPECTED_IDENTIFIER,
                     "Expected member name after '.'.",
                 )
-                if isinstance(expression, Identifier) and expression.name[:1].isupper():
+                qualified_name = self._qualified_expression_name(expression)
+                if (
+                    qualified_name is not None
+                    and qualified_name.rsplit(".", 1)[-1][:1].isupper()
+                ):
                     expression = EnumConstructionExpression(
                         span=SourceSpan(expression.span.start, member.span.end),
-                        type_name=expression.name,
+                        type_name=qualified_name,
                         variant_name=member.lexeme,
                         arguments=None,
                     )
@@ -669,6 +721,11 @@ class Parser:
                     object=expression,
                     index=index,
                 )
+            elif self._check(TokenKind.LEFT_BRACE) and self._looks_like_record_construction():
+                type_name = self._qualified_expression_name(expression)
+                if type_name is None:
+                    return expression
+                expression = self._finish_record_construction_name(type_name, expression.span.start)
             else:
                 return expression
 
@@ -699,6 +756,8 @@ class Parser:
                         )
                     arguments.append(CallArgument(span=value.span, name=None, value=value))
                 if not self._match(TokenKind.COMMA):
+                    break
+                if self._check(TokenKind.RIGHT_PAREN):
                     break
         end = self._consume(
             TokenKind.RIGHT_PAREN,
@@ -794,6 +853,11 @@ class Parser:
         )
 
     def _finish_record_construction(self, name: Token) -> RecordConstructionExpression:
+        return self._finish_record_construction_name(name.lexeme, name.span.start)
+
+    def _finish_record_construction_name(
+        self, type_name: str, start: SourceLocation
+    ) -> RecordConstructionExpression:
         self._consume(
             TokenKind.LEFT_BRACE,
             PARSE_EXPECTED_TOKEN,
@@ -822,16 +886,26 @@ class Parser:
                 )
                 if not self._match(TokenKind.COMMA):
                     break
+                if self._check(TokenKind.RIGHT_BRACE):
+                    break
         end = self._consume(
             TokenKind.RIGHT_BRACE,
             PARSE_EXPECTED_TOKEN,
             "Expected '}' after record initializer fields.",
         )
         return RecordConstructionExpression(
-            span=SourceSpan(name.span.start, end.span.end),
-            type_name=name.lexeme,
+            span=SourceSpan(start, end.span.end),
+            type_name=type_name,
             fields=tuple(fields),
         )
+
+    def _qualified_expression_name(self, expression: Expression) -> str | None:
+        if isinstance(expression, Identifier):
+            return expression.name
+        if isinstance(expression, MemberAccessExpression):
+            prefix = self._qualified_expression_name(expression.object)
+            return None if prefix is None else prefix + "." + expression.member
+        return None
 
     def _finish_list(self, start: Token) -> ListLiteral:
         elements: list[Expression] = []
@@ -839,6 +913,8 @@ class Parser:
             while True:
                 elements.append(self._parse_expression())
                 if not self._match(TokenKind.COMMA):
+                    break
+                if self._check(TokenKind.RIGHT_BRACKET):
                     break
         end = self._consume(
             TokenKind.RIGHT_BRACKET,
@@ -869,6 +945,8 @@ class Parser:
                     )
                 )
                 if not self._match(TokenKind.COMMA):
+                    break
+                if self._check(TokenKind.RIGHT_BRACE):
                     break
         end = self._consume(
             TokenKind.RIGHT_BRACE,

@@ -47,3 +47,14 @@ class EnumVariantDeclaration(Node):
 class EnumDeclaration(Statement):
     name: str
     variants: tuple[EnumVariantDeclaration, ...]
+
+
+@dataclass(frozen=True)
+class NewtypeDeclaration(Statement):
+    name: str
+    underlying_type: TypeExpression
+
+
+@dataclass(frozen=True)
+class ImportDeclaration(Statement):
+    path: tuple[str, ...]

@@ -21,12 +21,14 @@ from kaj.ast import (
     FunctionDeclaration,
     Identifier,
     IfStatement,
+    ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     ListLiteral,
     MapLiteral,
     MatchStatement,
     MemberAccessExpression,
+    NewtypeDeclaration,
     Node,
     NoneLiteral,
     Program,
@@ -87,6 +89,7 @@ class Resolver:
         self._references: list[ResolvedReference] = []
         self._declarations: list[DeclaredSymbol] = []
         self._diagnostics: list[Diagnostic] = []
+        self._newtype_names: set[str] = set()
 
     def resolve(self, program: Program) -> ResolutionResult:
         self._next_symbol_id = 0
@@ -94,11 +97,26 @@ class Resolver:
         self._references = []
         self._declarations = []
         self._diagnostics = []
+        self._newtype_names = {
+            statement.name
+            for statement in program.statements
+            if isinstance(statement, NewtypeDeclaration)
+        }
         builtin_scope = Scope(ScopeKind.MODULE) if self._include_builtins else None
         if builtin_scope is not None:
             print_symbol = self._new_symbol("print", SymbolKind.BUILTIN_FUNCTION, program.span)
             builtin_scope.declare(print_symbol)
         module_scope = Scope(ScopeKind.MODULE, builtin_scope)
+
+        for statement in program.statements:
+            if isinstance(statement, ImportDeclaration):
+                self._declare(
+                    module_scope,
+                    statement.path[0],
+                    SymbolKind.MODULE,
+                    statement.span,
+                    statement,
+                )
 
         for statement in program.statements:
             if isinstance(statement, FunctionDeclaration):
@@ -228,7 +246,15 @@ class Resolver:
             # reach function declarations through the module traversal above.
             return
         elif isinstance(
-            statement, (RecordDeclaration, EnumDeclaration, BreakStatement, ContinueStatement)
+            statement,
+            (
+                RecordDeclaration,
+                EnumDeclaration,
+                NewtypeDeclaration,
+                ImportDeclaration,
+                BreakStatement,
+                ContinueStatement,
+            ),
         ):
             return
         else:
@@ -255,7 +281,10 @@ class Resolver:
         elif isinstance(expression, CallExpression):
             if not (
                 isinstance(expression.callee, Identifier)
-                and expression.callee.name in {"some", "ok", "err"}
+                and (
+                    expression.callee.name in {"some", "ok", "err"}
+                    or expression.callee.name in self._newtype_names
+                )
             ):
                 self._resolve_expression(expression.callee, scope)
             for argument in expression.arguments:

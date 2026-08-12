@@ -25,12 +25,14 @@ from kaj.ast import (
     FunctionDeclaration,
     Identifier,
     IfStatement,
+    ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     ListLiteral,
     MapLiteral,
     MatchStatement,
     MemberAccessExpression,
+    NewtypeDeclaration,
     NoneLiteral,
     Program,
     RecordConstructionExpression,
@@ -50,6 +52,10 @@ from kaj.runtime.values import (
     KajEnumValue,
     KajFunction,
     KajList,
+    KajMap,
+    KajMapKey,
+    KajModuleValue,
+    KajNewtypeValue,
     KajRecord,
     RuntimeValue,
 )
@@ -57,6 +63,8 @@ from kaj.semantic import (
     EnumType,
     FunctionType,
     ListType,
+    MapType,
+    NewtypeType,
     OptionalType,
     PrimitiveType,
     RecordType,
@@ -75,6 +83,7 @@ class ExecutionResult:
     value: RuntimeValue
     output: str
     runtime_error: RuntimeErrorInfo | None
+    exports: tuple[tuple[str, RuntimeValue], ...] = ()
 
 
 class _ReturnSignal(Exception):
@@ -90,11 +99,13 @@ class Interpreter:
         types: TypeCheckResult,
         *,
         output: RuntimeOutput | None = None,
+        imported_modules: dict[int, KajModuleValue] | None = None,
     ) -> None:
         self._resolution = resolution
         self._types = types
         self._output = BufferOutput() if output is None else output
         self._captured_lines: list[str] = []
+        self._imported_modules = {} if imported_modules is None else imported_modules
 
     def interpret(self, program: Program) -> ExecutionResult:
         self._captured_lines = []
@@ -102,10 +113,23 @@ class Interpreter:
         module_environment = Environment(builtin_environment)
         try:
             self._install_builtins(builtin_environment)
+            for statement in program.statements:
+                if isinstance(statement, ImportDeclaration):
+                    symbol = self._resolution.symbol_for_declaration(statement)
+                    value = self._imported_modules.get(id(statement))
+                    if symbol is not None and value is not None:
+                        module_environment.define(symbol, value, mutable=False)
             self._install_functions(program, module_environment)
             for statement in program.statements:
                 if not isinstance(
-                    statement, (FunctionDeclaration, RecordDeclaration, EnumDeclaration)
+                    statement,
+                    (
+                        FunctionDeclaration,
+                        RecordDeclaration,
+                        EnumDeclaration,
+                        NewtypeDeclaration,
+                        ImportDeclaration,
+                    ),
                 ):
                     self._execute_statement(statement, module_environment)
         except RuntimeFailure as failure:
@@ -120,7 +144,18 @@ class Interpreter:
                     program.span,
                 ),
             )
-        return ExecutionResult(None, self._captured_output(), None)
+        exports: list[tuple[str, RuntimeValue]] = []
+        for name, symbol in self._resolution.module_scope.symbols.items():
+            if symbol.kind in {
+                SymbolKind.FUNCTION,
+                SymbolKind.LET_BINDING,
+                SymbolKind.VAR_BINDING,
+            }:
+                try:
+                    exports.append((name, module_environment.read(symbol)))
+                except KeyError:
+                    pass
+        return ExecutionResult(None, self._captured_output(), None, tuple(exports))
 
     def _captured_output(self) -> str:
         return "".join(line + "\n" for line in self._captured_lines)
@@ -146,7 +181,14 @@ class Interpreter:
                 self._fail("RUNTIME_INTERNAL_ERROR", "Function has no signature.", statement.span)
             environment.define(
                 symbol,
-                KajFunction(statement, symbol, signature, environment),
+                KajFunction(
+                    statement,
+                    symbol,
+                    signature,
+                    environment,
+                    self._resolution,
+                    self._types,
+                ),
                 mutable=False,
             )
 
@@ -252,7 +294,16 @@ class Interpreter:
                 self._execute_statement(selected.body, branch_environment)
         elif isinstance(statement, Block):
             self._execute_block(statement, Environment(environment))
-        elif isinstance(statement, (FunctionDeclaration, RecordDeclaration, EnumDeclaration)):
+        elif isinstance(
+            statement,
+            (
+                FunctionDeclaration,
+                RecordDeclaration,
+                EnumDeclaration,
+                NewtypeDeclaration,
+                ImportDeclaration,
+            ),
+        ):
             return
         elif isinstance(statement, (BreakStatement, ContinueStatement)):
             self._fail(
@@ -429,9 +480,51 @@ class Interpreter:
                 for element in expression.elements
             )
             return KajList(elements)
+        if isinstance(expression, MapLiteral):
+            map_type = self._expression_type(expression)
+            if not isinstance(map_type, MapType):
+                self._fail("RUNTIME_INTERNAL_ERROR", "Map has no static Map type.", expression.span)
+            entries: list[tuple[KajMapKey, RuntimeValue]] = []
+            seen: set[KajMapKey] = set()
+            for entry in expression.entries:
+                key_value = self._coerce(
+                    self._evaluate(entry.key, environment),
+                    self._expression_type(entry.key),
+                    map_type.key_type,
+                    entry.key.span,
+                )
+                value = self._coerce(
+                    self._evaluate(entry.value, environment),
+                    self._expression_type(entry.value),
+                    map_type.value_type,
+                    entry.value.span,
+                )
+                key = self._map_key(key_value, map_type, entry.key.span)
+                if key in seen:
+                    self._fail(
+                        "RUNTIME_DUPLICATE_MAP_KEY",
+                        "Map literal contains duplicate evaluated keys.",
+                        entry.key.span,
+                    )
+                seen.add(key)
+                entries.append((key, value))
+            return KajMap(map_type, tuple(entries))
         if isinstance(expression, IndexExpression):
             object_value = self._evaluate(expression.object, environment)
             index_value = self._evaluate(expression.index, environment)
+            if isinstance(object_value, KajMap):
+                coerced_key = self._coerce(
+                    index_value,
+                    self._expression_type(expression.index),
+                    object_value.type.key_type,
+                    expression.index.span,
+                )
+                key = self._map_key(coerced_key, object_value.type, expression.index.span)
+                optional_type = OptionalType(object_value.type.value_type)
+                try:
+                    return KajEnumValue(optional_type, "some", (object_value.read(key),))
+                except KeyError:
+                    return KajEnumValue(optional_type, "none", ())
             if not isinstance(object_value, KajList) or type(index_value) is not int:
                 self._fail(
                     "RUNTIME_INVALID_OPERATION",
@@ -449,6 +542,19 @@ class Interpreter:
             object_value = self._evaluate(expression.object, environment)
             if isinstance(object_value, KajList) and expression.member == "count":
                 return len(object_value.elements)
+            if isinstance(object_value, KajMap) and expression.member == "count":
+                return len(object_value.entries)
+            if isinstance(object_value, KajNewtypeValue) and expression.member == "value":
+                return object_value.value
+            if isinstance(object_value, KajModuleValue):
+                try:
+                    return object_value.read(expression.member)
+                except KeyError:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR",
+                        f"Module member '{expression.member}' is absent at runtime.",
+                        expression.span,
+                    )
             if isinstance(object_value, KajRecord):
                 try:
                     return object_value.read(expression.member)
@@ -461,12 +567,6 @@ class Interpreter:
             self._fail(
                 "RUNTIME_INVALID_OPERATION",
                 f"Unsupported runtime member '{expression.member}'.",
-                expression.span,
-            )
-        if isinstance(expression, MapLiteral):
-            self._fail(
-                "RUNTIME_INVALID_OPERATION",
-                f"{type(expression).__name__} is not executable in Checkpoint 9.",
                 expression.span,
             )
         self._fail(
@@ -585,6 +685,29 @@ class Interpreter:
         self._fail("RUNTIME_INVALID_OPERATION", "Unknown binary operator.", span)
 
     def _evaluate_call(self, expression: CallExpression, environment: Environment) -> RuntimeValue:
+        expression_type = self._expression_type(expression)
+        if isinstance(expression_type, NewtypeType):
+            if len(expression.arguments) != 1:
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Newtype constructor has invalid arity.",
+                    expression.span,
+                )
+            definition = self._types.newtype_definition(expression_type)
+            if definition is None:
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Newtype constructor has no semantic definition.",
+                    expression.span,
+                )
+            argument = expression.arguments[0]
+            value = self._coerce(
+                self._evaluate(argument.value, environment),
+                self._expression_type(argument.value),
+                definition.underlying_type,
+                argument.span,
+            )
+            return KajNewtypeValue(expression_type, value)
         if isinstance(expression.callee, Identifier) and expression.callee.name in {
             "some",
             "ok",
@@ -595,6 +718,7 @@ class Interpreter:
             )
         callee = self._evaluate(expression.callee, environment)
         values = [self._evaluate(argument.value, environment) for argument in expression.arguments]
+        argument_types = [self._expression_type(item.value) for item in expression.arguments]
         if callee is BuiltinFunction.PRINT:
             if len(values) != 1:
                 self._fail(
@@ -605,8 +729,11 @@ class Interpreter:
         if not isinstance(callee, KajFunction):
             self._fail("RUNTIME_INVALID_OPERATION", "Value is not callable.", expression.span)
         call_environment = Environment(callee.environment)
-        for argument, value in zip(expression.arguments, values, strict=True):
-            mapping = self._types.mapping_for_argument(argument)
+        caller_types = self._types
+        for argument, value, source_type in zip(
+            expression.arguments, values, argument_types, strict=True
+        ):
+            mapping = caller_types.mapping_for_argument(argument)
             if mapping is None:
                 self._fail(
                     "RUNTIME_INTERNAL_ERROR",
@@ -614,27 +741,34 @@ class Interpreter:
                     argument.span,
                 )
             parameter = callee.declaration.parameters[mapping.parameter_index]
-            symbol = self._resolution.symbol_for_declaration(parameter)
+            symbol = callee.resolution.symbol_for_declaration(parameter)
             if symbol is None:
                 self._fail(
                     "RUNTIME_INTERNAL_ERROR", "Function parameter has no symbol.", parameter.span
                 )
             value = self._coerce(
                 value,
-                self._expression_type(argument.value),
+                source_type,
                 mapping.parameter.type,
                 argument.span,
             )
             call_environment.define(symbol, value, mutable=mapping.parameter.mutable)
+        caller_resolution = self._resolution
+        self._resolution = callee.resolution
+        self._types = callee.types
         try:
-            self._execute_block(callee.declaration.body, call_environment)
-        except _ReturnSignal as signal:
-            return self._coerce(
-                signal.value,
-                signal.source_type,
-                callee.signature.return_type,
-                callee.declaration.span,
-            )
+            try:
+                self._execute_block(callee.declaration.body, call_environment)
+            except _ReturnSignal as signal:
+                return self._coerce(
+                    signal.value,
+                    signal.source_type,
+                    callee.signature.return_type,
+                    callee.declaration.span,
+                )
+        finally:
+            self._resolution = caller_resolution
+            self._types = caller_types
         return None
 
     def _evaluate_standard_constructor(
@@ -685,6 +819,37 @@ class Interpreter:
         if isinstance(value, Decimal):
             return value
         self._fail("RUNTIME_INTERNAL_ERROR", "Expected numeric value for promotion.", span)
+
+    def _map_key(self, value: RuntimeValue, map_type: MapType, span: SourceSpan) -> KajMapKey:
+        return self._canonical_map_key(value, map_type.key_type, span)
+
+    def _canonical_map_key(
+        self, value: RuntimeValue, key_type: SemanticType, span: SourceSpan
+    ) -> KajMapKey:
+        if isinstance(key_type, NewtypeType):
+            if not isinstance(value, KajNewtypeValue) or value.type != key_type:
+                self._fail("RUNTIME_INTERNAL_ERROR", "Map newtype key has invalid identity.", span)
+            definition = self._types.newtype_definition(key_type)
+            if definition is None:
+                self._fail("RUNTIME_INTERNAL_ERROR", "Map newtype key has no definition.", span)
+            return KajMapKey(
+                key_type,
+                self._canonical_map_key(value.value, definition.underlying_type, span),
+            )
+        if not isinstance(key_type, PrimitiveType) or key_type in {
+            PrimitiveType.NONE,
+            PrimitiveType.ERROR,
+        }:
+            self._fail("RUNTIME_INTERNAL_ERROR", "Map has an invalid key type.", span)
+        if (
+            (key_type is PrimitiveType.BOOL and type(value) is not bool)
+            or (key_type is PrimitiveType.INT and type(value) is not int)
+            or (key_type is PrimitiveType.DECIMAL and not isinstance(value, Decimal))
+            or (key_type is PrimitiveType.STRING and not isinstance(value, str))
+            or (key_type is PrimitiveType.BYTES and not isinstance(value, bytes))
+        ):
+            self._fail("RUNTIME_INTERNAL_ERROR", "Map key does not match its static type.", span)
+        return KajMapKey(key_type, cast(bool | int | Decimal | str | bytes, value))
 
     def _expression_type(self, expression: Expression) -> SemanticType:
         semantic_type = self._types.type_of_expression(expression)

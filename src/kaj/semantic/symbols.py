@@ -12,6 +12,7 @@ class SymbolKind(Enum):
     PARAMETER = auto()
     LOOP_VARIABLE = auto()
     PATTERN_BINDING = auto()
+    MODULE = auto()
 
 
 @dataclass(frozen=True)

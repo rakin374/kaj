@@ -1,8 +1,10 @@
-from kaj import __version__
+from typing import NoReturn
+
+from kaj.cli import cli_main
 
 
-def main() -> None:
-    print(f"Kaj {__version__}")
+def main() -> NoReturn:
+    raise SystemExit(cli_main())
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 12 — Optional and Result
+**Current checkpoint:** Checkpoint 17 — Module Imports
 **Status:** Complete
 
 ## Completed
@@ -87,6 +87,28 @@
   arguments, contextual `some`/`none`/`ok`/`err` typing, and primitive `None` preservation.
 - Optional/Result matching through the shared tagged-value exhaustiveness, pattern-scope,
   definite-return, and interpreter machinery, with explicit runtime type/tag identity.
+- Invariant `Map<K,V>` types, contextual and inferred map literals, restricted stable key types,
+  safe lookup as `Optional<V>`, and `count` without mutation or iteration semantics.
+- Controlled immutable `KajMap` runtime values with typed keys, exact Decimal behavior,
+  source-order evaluation, contextual promotion, and duplicate evaluated-key rejection.
+- Nominal newtype declarations with shared type-namespace predeclaration, recursive-cycle
+  diagnostics, explicit one-argument construction, and one-layer `.value` unwrapping.
+- Explicit `KajNewtypeValue` runtime wrappers and nominal map-key canonicalization, without
+  implicit conversion, inherited operators, equality, truthiness, or printing.
+- Deterministic AST-based canonical source formatting with four-space indentation, LF output,
+  stable declaration layout, exact literal escaping, and deterministic width-based collections.
+- Precedence- and associativity-aware expression rendering with span-insensitive semantic AST
+  round trips and byte-for-byte formatter idempotence.
+- Shared parse and compile pipelines powering `kaj check`, `run`, `fmt`, and `ast`, with stable
+  path-aware diagnostics and strict success/compile/runtime/misuse exit classes.
+- UTF-8 source loading, atomic in-place formatting, parse-only AST JSON emission, direct runtime
+  stdout streaming, and traceback-free handling of normal command and file errors.
+- Explicit local import AST nodes, canonical formatting, strict AST JSON v1 representation, and
+  qualified value/type access for `import foo` and `import foo.bar`.
+- Root-confined dotted-name loading, dependency-first graph compilation, canonical deduplication,
+  cycle/missing/duplicate/member diagnostics, and path-aware dependency diagnostics.
+- Once-only dependency initialization with shared runtime module namespaces, qualified function
+  calls and nominal type construction, while `fmt` and `ast` remain intentionally single-file.
 - An explicit host builtin scope containing only narrowly typed `print`, with deterministic
   primitive formatting and an injectable output sink.
 - Structured runtime failures for division by zero, invalid operations, and internal-state errors,

@@ -33,6 +33,7 @@ from kaj.ast import (
     GenericType,
     Identifier,
     IfStatement,
+    ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     ListLiteral,
@@ -42,6 +43,7 @@ from kaj.ast import (
     MatchStatement,
     MemberAccessExpression,
     NamedType,
+    NewtypeDeclaration,
     Node,
     NoneLiteral,
     Parameter,
@@ -465,6 +467,14 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
             {"name": node.name, "variants": [_encode_node(item) for item in node.variants]},
             span,
         )
+    if isinstance(node, NewtypeDeclaration):
+        return _node(
+            "newtype_declaration",
+            {"name": node.name, "underlying_type": _encode_node(node.underlying_type)},
+            span,
+        )
+    if isinstance(node, ImportDeclaration):
+        return _node("import_declaration", {"path": list(node.path)}, span)
     raise ASTJSONError(
         ASTJSON_UNKNOWN_NODE_KIND, f"Unsupported internal AST node: {type(node).__name__}."
     )
@@ -933,6 +943,31 @@ def _decode_enum_declaration(obj: dict[str, object], path: JSONPath) -> Node:
     )
 
 
+def _decode_newtype_declaration(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "underlying_type"}, path)
+    underlying = _expect_type_expression(
+        _decode_node(_required(obj, "underlying_type", path), path + ("underlying_type",)),
+        path + ("underlying_type",),
+    )
+    return NewtypeDeclaration(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        underlying_type=underlying,
+    )
+
+
+def _decode_import_declaration(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"path"}, path)
+    raw = _required(obj, "path", path)
+    if not isinstance(raw, list) or not raw or any(not isinstance(item, str) for item in raw):
+        raise ASTJSONError(
+            ASTJSON_INVALID_FIELD,
+            "Import path must be a non-empty array of strings.",
+            path + ("path",),
+        )
+    return ImportDeclaration(span=_span_field(obj, path), path=tuple(cast(list[str], raw)))
+
+
 type NodeDecoder = Callable[[dict[str, object], JSONPath], Node]
 _NODE_DECODERS: dict[str, NodeDecoder] = {
     "program": _decode_program,
@@ -978,6 +1013,8 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "enum_payload_field": _decode_enum_payload_field,
     "enum_variant_declaration": _decode_enum_variant,
     "enum_declaration": _decode_enum_declaration,
+    "newtype_declaration": _decode_newtype_declaration,
+    "import_declaration": _decode_import_declaration,
 }
 
 

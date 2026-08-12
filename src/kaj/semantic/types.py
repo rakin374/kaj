@@ -22,6 +22,12 @@ class ListType:
 
 
 @dataclass(frozen=True)
+class MapType:
+    key_type: ValueType
+    value_type: ValueType
+
+
+@dataclass(frozen=True)
 class TypeSymbol:
     id: int
     name: str
@@ -39,6 +45,11 @@ class EnumType:
 
 
 @dataclass(frozen=True)
+class NewtypeType:
+    symbol: TypeSymbol
+
+
+@dataclass(frozen=True)
 class OptionalType:
     value_type: ValueType
 
@@ -49,7 +60,16 @@ class ResultType:
     err_type: ValueType
 
 
-type ValueType = PrimitiveType | ListType | RecordType | EnumType | OptionalType | ResultType
+type ValueType = (
+    PrimitiveType
+    | ListType
+    | MapType
+    | RecordType
+    | EnumType
+    | NewtypeType
+    | OptionalType
+    | ResultType
+)
 
 
 @dataclass(frozen=True)
@@ -86,6 +106,23 @@ class EnumDefinition:
 
 
 @dataclass(frozen=True)
+class NewtypeDefinition:
+    type: NewtypeType
+    underlying_type: ValueType
+
+
+@dataclass(frozen=True)
+class ModuleType:
+    name: str
+    values: tuple[tuple[str, SemanticType], ...]
+    types: tuple[tuple[str, ValueType], ...]
+    modules: tuple[tuple[str, ModuleType], ...] = ()
+    records: tuple[RecordDefinition, ...] = ()
+    enums: tuple[EnumDefinition, ...] = ()
+    newtypes: tuple[NewtypeDefinition, ...] = ()
+
+
+@dataclass(frozen=True)
 class FunctionParameterType:
     name: str
     type: ValueType
@@ -102,7 +139,7 @@ class BuiltinFunctionType(Enum):
     PRINT = "print"
 
 
-type SemanticType = ValueType | FunctionType | BuiltinFunctionType
+type SemanticType = ValueType | FunctionType | BuiltinFunctionType | ModuleType
 
 
 PRIMITIVE_TYPES_BY_NAME: dict[str, PrimitiveType] = {
@@ -123,15 +160,21 @@ def format_type(semantic_type: SemanticType) -> str:
         return semantic_type.value
     if isinstance(semantic_type, BuiltinFunctionType):
         return f"<builtin {semantic_type.value}>"
+    if isinstance(semantic_type, ModuleType):
+        return f"<module {semantic_type.name}>"
     if isinstance(semantic_type, ListType):
         return f"List<{format_type(semantic_type.element_type)}>"
+    if isinstance(semantic_type, MapType):
+        return (
+            f"Map<{format_type(semantic_type.key_type)}, {format_type(semantic_type.value_type)}>"
+        )
     if isinstance(semantic_type, OptionalType):
         return f"Optional<{format_type(semantic_type.value_type)}>"
     if isinstance(semantic_type, ResultType):
         return (
             f"Result<{format_type(semantic_type.ok_type)}, {format_type(semantic_type.err_type)}>"
         )
-    if isinstance(semantic_type, (RecordType, EnumType)):
+    if isinstance(semantic_type, (RecordType, EnumType, NewtypeType)):
         return semantic_type.symbol.name
     parameters = ", ".join(format_type(parameter.type) for parameter in semantic_type.parameters)
     return f"({parameters}) -> {format_type(semantic_type.return_type)}"

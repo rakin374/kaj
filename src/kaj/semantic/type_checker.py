@@ -25,6 +25,7 @@ from kaj.ast import (
     GenericType,
     Identifier,
     IfStatement,
+    ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     ListLiteral,
@@ -33,6 +34,7 @@ from kaj.ast import (
     MatchStatement,
     MemberAccessExpression,
     NamedType,
+    NewtypeDeclaration,
     NoneLiteral,
     Parameter,
     Program,
@@ -60,6 +62,10 @@ from kaj.semantic.types import (
     FunctionParameterType,
     FunctionType,
     ListType,
+    MapType,
+    ModuleType,
+    NewtypeDefinition,
+    NewtypeType,
     OptionalType,
     PrimitiveType,
     RecordDefinition,
@@ -124,6 +130,10 @@ class TypeCheckResult:
     enums: tuple[EnumDefinition, ...]
     enum_arguments: tuple[MappedEnumArgument, ...]
     match_cases: tuple[MappedMatchCase, ...]
+    newtypes: tuple[NewtypeDefinition, ...]
+    imported_records: tuple[RecordDefinition, ...]
+    imported_enums: tuple[EnumDefinition, ...]
+    imported_newtypes: tuple[NewtypeDefinition, ...]
     diagnostics: tuple[Diagnostic, ...]
 
     def type_of_expression(self, expression: Expression) -> SemanticType | None:
@@ -157,7 +167,7 @@ class TypeCheckResult:
         return None
 
     def record_definition(self, record_type: RecordType) -> RecordDefinition | None:
-        for definition in self.records:
+        for definition in (*self.records, *self.imported_records):
             if definition.type == record_type:
                 return definition
         return None
@@ -171,11 +181,25 @@ class TypeCheckResult:
         return next((item for item in self.match_cases if item.case is case), None)
 
     def enum_definition(self, enum_type: EnumType) -> EnumDefinition | None:
-        return next((item for item in self.enums if item.type == enum_type), None)
+        return next(
+            (item for item in (*self.enums, *self.imported_enums) if item.type == enum_type), None
+        )
+
+    def newtype_definition(self, newtype_type: NewtypeType) -> NewtypeDefinition | None:
+        return next(
+            (item for item in (*self.newtypes, *self.imported_newtypes) if item.type == newtype_type),
+            None,
+        )
 
 
 class TypeChecker:
-    def __init__(self, resolution: ResolutionResult) -> None:
+    def __init__(
+        self,
+        resolution: ResolutionResult,
+        *,
+        imported_modules: dict[int, ModuleType] | None = None,
+        type_id_base: int = 0,
+    ) -> None:
         self._resolution = resolution
         self._expression_types: dict[int, TypedExpression] = {}
         self._symbol_types: dict[int, TypedSymbol] = {}
@@ -194,6 +218,11 @@ class TypeChecker:
         self._mapped_enum_arguments: list[MappedEnumArgument] = []
         self._mapped_match_cases: list[MappedMatchCase] = []
         self._exhaustive_matches: set[int] = set()
+        self._newtype_types_by_name: dict[str, NewtypeType] = {}
+        self._newtype_types_by_declaration: dict[int, NewtypeType] = {}
+        self._newtype_definitions: list[NewtypeDefinition] = []
+        self._imported_modules = {} if imported_modules is None else imported_modules
+        self._type_id_base = type_id_base
 
     def check(self, program: Program) -> TypeCheckResult:
         self._expression_types = {}
@@ -213,12 +242,22 @@ class TypeChecker:
         self._mapped_enum_arguments = []
         self._mapped_match_cases = []
         self._exhaustive_matches = set()
+        self._newtype_types_by_name = {}
+        self._newtype_types_by_declaration = {}
+        self._newtype_definitions = []
         self._predeclare_types(program)
+        self._define_newtypes(program)
         self._define_records(program)
         self._define_enums(program)
         for symbol in self._resolution.symbols:
             if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name == "print":
                 self._record_symbol(symbol, BuiltinFunctionType.PRINT)
+        for statement in program.statements:
+            if isinstance(statement, ImportDeclaration):
+                import_symbol = self._resolution.symbol_for_declaration(statement)
+                module_type = self._imported_modules.get(id(statement))
+                if import_symbol is not None and module_type is not None:
+                    self._record_symbol(import_symbol, module_type)
         for statement in program.statements:
             if isinstance(statement, FunctionDeclaration):
                 self._declare_function_signature(statement)
@@ -234,7 +273,44 @@ class TypeChecker:
             enums=tuple(self._enum_definitions),
             enum_arguments=tuple(self._mapped_enum_arguments),
             match_cases=tuple(self._mapped_match_cases),
+            newtypes=tuple(self._newtype_definitions),
+            imported_records=tuple(
+                definition
+                for module in self._imported_modules.values()
+                for definition in self._module_record_definitions(module)
+            ),
+            imported_enums=tuple(
+                definition
+                for module in self._imported_modules.values()
+                for definition in self._module_enum_definitions(module)
+            ),
+            imported_newtypes=tuple(
+                definition
+                for module in self._imported_modules.values()
+                for definition in self._module_newtype_definitions(module)
+            ),
             diagnostics=tuple(self._diagnostics),
+        )
+
+    def _module_record_definitions(self, module: ModuleType) -> tuple[RecordDefinition, ...]:
+        return module.records + tuple(
+            definition
+            for _, child in module.modules
+            for definition in self._module_record_definitions(child)
+        )
+
+    def _module_enum_definitions(self, module: ModuleType) -> tuple[EnumDefinition, ...]:
+        return module.enums + tuple(
+            definition
+            for _, child in module.modules
+            for definition in self._module_enum_definitions(child)
+        )
+
+    def _module_newtype_definitions(self, module: ModuleType) -> tuple[NewtypeDefinition, ...]:
+        return module.newtypes + tuple(
+            definition
+            for _, child in module.modules
+            for definition in self._module_newtype_definitions(child)
         )
 
     def _record_expression(
@@ -253,13 +329,14 @@ class TypeChecker:
         return PrimitiveType.ERROR if typed is None else typed.type
 
     def _predeclare_types(self, program: Program) -> None:
-        next_id = 0
+        next_id = self._type_id_base
         for statement in program.statements:
-            if not isinstance(statement, (RecordDeclaration, EnumDeclaration)):
+            if not isinstance(statement, (RecordDeclaration, EnumDeclaration, NewtypeDeclaration)):
                 continue
             if (
                 statement.name in self._record_types_by_name
                 or statement.name in self._enum_types_by_name
+                or statement.name in self._newtype_types_by_name
             ):
                 self._diagnose(
                     "TYPE_DUPLICATE_TYPE_NAME",
@@ -273,10 +350,56 @@ class TypeChecker:
                 record_type = RecordType(symbol)
                 self._record_types_by_name[statement.name] = record_type
                 self._record_types_by_declaration[id(statement)] = record_type
-            else:
+            elif isinstance(statement, EnumDeclaration):
                 enum_type = EnumType(symbol)
                 self._enum_types_by_name[statement.name] = enum_type
                 self._enum_types_by_declaration[id(statement)] = enum_type
+            else:
+                newtype_type = NewtypeType(symbol)
+                self._newtype_types_by_name[statement.name] = newtype_type
+                self._newtype_types_by_declaration[id(statement)] = newtype_type
+
+    def _define_newtypes(self, program: Program) -> None:
+        declarations: dict[str, NewtypeDeclaration] = {}
+        for statement in program.statements:
+            if not isinstance(statement, NewtypeDeclaration):
+                continue
+            newtype_type = self._newtype_types_by_declaration.get(id(statement))
+            if newtype_type is None:
+                continue
+            declarations[statement.name] = statement
+            self._newtype_definitions.append(
+                NewtypeDefinition(newtype_type, self._resolve_annotation(statement.underlying_type))
+            )
+        state: dict[str, int] = {}
+        recursive: set[str] = set()
+        stack: list[str] = []
+
+        def visit(name: str) -> None:
+            if state.get(name) == 2:
+                return
+            if state.get(name) == 1:
+                recursive.update(stack[stack.index(name) :])
+                return
+            state[name] = 1
+            stack.append(name)
+            declaration = declarations[name]
+            if isinstance(declaration.underlying_type, NamedType):
+                target = declaration.underlying_type.name
+                if target in declarations:
+                    visit(target)
+            stack.pop()
+            state[name] = 2
+
+        for name in declarations:
+            visit(name)
+        for name, declaration in declarations.items():
+            if name in recursive:
+                self._diagnose(
+                    "TYPE_RECURSIVE_NEWTYPE",
+                    f"Newtype '{name}' participates in a recursive newtype cycle.",
+                    declaration.span,
+                )
 
     def _define_records(self, program: Program) -> None:
         for statement in program.statements:
@@ -360,7 +483,7 @@ class TypeChecker:
             primitive = PRIMITIVE_TYPES_BY_NAME.get(annotation.name)
             if primitive is not None:
                 return primitive
-            if annotation.name in {"List", "Optional", "Result"}:
+            if annotation.name in {"List", "Map", "Optional", "Result"}:
                 self._diagnose(
                     "TYPE_INVALID_TYPE_ARGUMENTS",
                     f"{annotation.name} requires generic type arguments.",
@@ -373,6 +496,13 @@ class TypeChecker:
             enum_type = self._enum_types_by_name.get(annotation.name)
             if enum_type is not None:
                 return enum_type
+            newtype_type = self._newtype_types_by_name.get(annotation.name)
+            if newtype_type is not None:
+                return newtype_type
+            if "." in annotation.name:
+                imported = self._resolve_imported_type(annotation.name)
+                if imported is not None:
+                    return imported
         elif isinstance(annotation, GenericType):
             if annotation.base.name == "List":
                 if len(annotation.arguments) != 1:
@@ -405,6 +535,18 @@ class TypeChecker:
                     self._resolve_annotation(annotation.arguments[0]),
                     self._resolve_annotation(annotation.arguments[1]),
                 )
+            if annotation.base.name == "Map":
+                if len(annotation.arguments) != 2:
+                    self._diagnose(
+                        "TYPE_INVALID_TYPE_ARGUMENTS",
+                        "Map requires exactly two type arguments.",
+                        annotation.span,
+                    )
+                    return PrimitiveType.ERROR
+                key_type = self._resolve_annotation(annotation.arguments[0])
+                value_type = self._resolve_annotation(annotation.arguments[1])
+                self._validate_map_key_type(key_type, annotation.arguments[0].span)
+                return MapType(key_type, value_type)
         else:
             raise TypeError(f"Unsupported type expression: {type(annotation).__name__}")
         self._diagnose(
@@ -413,6 +555,24 @@ class TypeChecker:
             annotation.span,
         )
         return PrimitiveType.ERROR
+
+    def _resolve_imported_type(self, path: str) -> ValueType | None:
+        parts = path.split(".")
+        module = next(
+            (
+                imported
+                for imported in self._imported_modules.values()
+                if imported.name.split(".")[0] == parts[0]
+            ),
+            None,
+        )
+        if module is None:
+            return None
+        for segment in parts[1:-1]:
+            module = next((item for name, item in module.modules if name == segment), None)
+            if module is None:
+                return None
+        return next((item for name, item in module.types if name == parts[-1]), None)
 
     def _check_binding(self, declaration: BindingDeclaration) -> None:
         declared_type = (
@@ -495,7 +655,10 @@ class TypeChecker:
                     f"Function '{statement.name}' may reach its end without returning.",
                     statement.span,
                 )
-        elif isinstance(statement, (RecordDeclaration, EnumDeclaration)):
+        elif isinstance(
+            statement,
+            (RecordDeclaration, EnumDeclaration, NewtypeDeclaration, ImportDeclaration),
+        ):
             return
         elif isinstance(statement, MatchStatement):
             self._check_match(statement)
@@ -525,11 +688,11 @@ class TypeChecker:
         target_type = self._infer(statement.target)
         value_type = self._infer(statement.value, target_type)
         if isinstance(statement.target, IndexExpression) and isinstance(
-            self._recorded_expression_type(statement.target.object), ListType
+            self._recorded_expression_type(statement.target.object), (ListType, MapType)
         ):
             self._diagnose(
                 "TYPE_MISMATCH",
-                "List index assignment is not supported in Kaj v0 Checkpoint 9.",
+                "Collection index assignment is not supported in Kaj v0.",
                 statement.target.span,
             )
             return
@@ -614,6 +777,49 @@ class TypeChecker:
                         expression.span,
                     )
                     result = PrimitiveType.ERROR
+            elif isinstance(object_type, MapType):
+                if expression.member == "count":
+                    result = PrimitiveType.INT
+                else:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_MEMBER",
+                        f"Map has no member '{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
+            elif isinstance(object_type, NewtypeType):
+                if expression.member == "value":
+                    result = self._newtype_definition(object_type).underlying_type
+                else:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_MEMBER",
+                        f"Newtype '{object_type.symbol.name}' has no member '{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
+            elif isinstance(object_type, ModuleType):
+                module = next(
+                    (item for name, item in object_type.modules if name == expression.member), None
+                )
+                value = next(
+                    (item for name, item in object_type.values if name == expression.member), None
+                )
+                exported_type = next(
+                    (item for name, item in object_type.types if name == expression.member), None
+                )
+                if module is not None:
+                    result = module
+                elif value is not None:
+                    result = value
+                elif exported_type is not None:
+                    result = exported_type
+                else:
+                    self._diagnose(
+                        "IMPORT_UNKNOWN_MEMBER",
+                        f"Module '{object_type.name}' has no exported value '{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
             elif isinstance(object_type, RecordType):
                 definition = self._record_definition(object_type)
                 field = next(
@@ -633,24 +839,30 @@ class TypeChecker:
                 result = PrimitiveType.ERROR
         elif isinstance(expression, IndexExpression):
             object_type = self._infer(expression.object)
-            index_type = self._infer(expression.index)
-            if index_type not in (PrimitiveType.INT, PrimitiveType.ERROR):
-                self._diagnose(
-                    "TYPE_MISMATCH",
-                    f"List index must be Int, not {format_type(index_type)}.",
-                    expression.index.span,
-                )
-            if isinstance(object_type, ListType):
+            index_expected = object_type.key_type if isinstance(object_type, MapType) else None
+            index_type = self._infer(expression.index, index_expected)
+            if isinstance(object_type, MapType):
+                if not is_assignable(index_type, object_type.key_type):
+                    self._diagnose(
+                        "TYPE_MISMATCH",
+                        f"Map key must be {format_type(object_type.key_type)}, not {format_type(index_type)}.",
+                        expression.index.span,
+                    )
+                result = OptionalType(object_type.value_type)
+            elif isinstance(object_type, ListType):
+                if index_type not in (PrimitiveType.INT, PrimitiveType.ERROR):
+                    self._diagnose(
+                        "TYPE_MISMATCH",
+                        f"List index must be Int, not {format_type(index_type)}.",
+                        expression.index.span,
+                    )
                 result = object_type.element_type
             else:
                 result = PrimitiveType.ERROR
         elif isinstance(expression, ListLiteral):
             result = self._infer_list(expression, expected)
         elif isinstance(expression, MapLiteral):
-            for entry in expression.entries:
-                self._infer(entry.key)
-                self._infer(entry.value)
-            result = PrimitiveType.ERROR
+            result = self._infer_map(expression, expected)
         else:
             raise TypeError(f"Unsupported expression node: {type(expression).__name__}")
         return self._record_expression(expression, result)
@@ -691,7 +903,17 @@ class TypeChecker:
             )
             return PrimitiveType.ERROR
         if isinstance(
-            common, (PrimitiveType, ListType, RecordType, EnumType, OptionalType, ResultType)
+            common,
+            (
+                PrimitiveType,
+                ListType,
+                MapType,
+                RecordType,
+                EnumType,
+                NewtypeType,
+                OptionalType,
+                ResultType,
+            ),
         ):
             return ListType(common)
         self._diagnose(
@@ -701,17 +923,182 @@ class TypeChecker:
         )
         return PrimitiveType.ERROR
 
+    def _infer_map(self, expression: MapLiteral, expected: SemanticType | None) -> SemanticType:
+        if expected is PrimitiveType.ERROR:
+            for entry in expression.entries:
+                self._infer(entry.key)
+                self._infer(entry.value)
+            return PrimitiveType.ERROR
+        if isinstance(expected, MapType):
+            for entry in expression.entries:
+                key_type = self._infer(entry.key, expected.key_type)
+                value_type = self._infer(entry.value, expected.value_type)
+                if not is_assignable(key_type, expected.key_type):
+                    self._diagnose(
+                        "TYPE_MISMATCH",
+                        f"Cannot use {format_type(key_type)} as map key {format_type(expected.key_type)}.",
+                        entry.key.span,
+                    )
+                if not is_assignable(value_type, expected.value_type):
+                    self._diagnose(
+                        "TYPE_MISMATCH",
+                        f"Cannot use {format_type(value_type)} as map value {format_type(expected.value_type)}.",
+                        entry.value.span,
+                    )
+            return expected
+        if not expression.entries:
+            self._diagnose(
+                "TYPE_CANNOT_INFER_MAP_TYPE",
+                "Cannot infer key and value types of an empty map.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        key_types = [self._infer(entry.key) for entry in expression.entries]
+        value_types = [self._infer(entry.value) for entry in expression.entries]
+        key_type = self._common_map_component(key_types, "keys", expression.span)
+        value_type = self._common_map_component(value_types, "values", expression.span)
+        self._validate_map_key_type(key_type, expression.span)
+        return MapType(key_type, value_type)
+
+    def _common_map_component(
+        self, types: list[SemanticType], label: str, span: SourceSpan
+    ) -> ValueType:
+        known = [item for item in types if item is not PrimitiveType.ERROR]
+        if not known:
+            return PrimitiveType.ERROR
+        common = known[0]
+        for item in known[1:]:
+            if item == common:
+                continue
+            if {item, common} == {PrimitiveType.INT, PrimitiveType.DECIMAL}:
+                common = PrimitiveType.DECIMAL
+                continue
+            self._diagnose(
+                "TYPE_MISMATCH",
+                f"Map {label} {format_type(common)} and {format_type(item)} have no common type.",
+                span,
+            )
+            return PrimitiveType.ERROR
+        if isinstance(
+            common,
+            (
+                PrimitiveType,
+                ListType,
+                MapType,
+                RecordType,
+                EnumType,
+                NewtypeType,
+                OptionalType,
+                ResultType,
+            ),
+        ):
+            return common
+        self._diagnose("TYPE_MISMATCH", f"Map {label} must have a supported value type.", span)
+        return PrimitiveType.ERROR
+
+    def _validate_map_key_type(self, key_type: ValueType, span: SourceSpan) -> None:
+        allowed = {
+            PrimitiveType.BOOL,
+            PrimitiveType.INT,
+            PrimitiveType.DECIMAL,
+            PrimitiveType.STRING,
+            PrimitiveType.BYTES,
+        }
+        candidate = key_type
+        seen: set[NewtypeType] = set()
+        while isinstance(candidate, NewtypeType) and candidate not in seen:
+            seen.add(candidate)
+            definition = next(
+                (item for item in self._newtype_definitions if item.type == candidate), None
+            )
+            if definition is None:
+                return
+            candidate = definition.underlying_type
+        if candidate is not PrimitiveType.ERROR and candidate not in allowed:
+            self._diagnose(
+                "TYPE_INVALID_MAP_KEY_TYPE",
+                f"Type {format_type(key_type)} cannot be used as a map key.",
+                span,
+            )
+
     def _record_definition(self, record_type: RecordType) -> RecordDefinition:
         for definition in self._record_definitions:
             if definition.type == record_type:
                 return definition
+        for module in self._imported_modules.values():
+            imported_definition = self._find_record_definition(module, record_type)
+            if imported_definition is not None:
+                return imported_definition
         raise RuntimeError(f"Missing definition for record {record_type.symbol.name}")
 
     def _enum_definition(self, enum_type: EnumType) -> EnumDefinition:
-        return next(item for item in self._enum_definitions if item.type == enum_type)
+        for definition in self._enum_definitions:
+            if definition.type == enum_type:
+                return definition
+        for module in self._imported_modules.values():
+            imported_definition = self._find_enum_definition(module, enum_type)
+            if imported_definition is not None:
+                return imported_definition
+        raise RuntimeError(f"Missing definition for enum {enum_type.symbol.name}")
+
+    def _newtype_definition(self, newtype_type: NewtypeType) -> NewtypeDefinition:
+        for definition in self._newtype_definitions:
+            if definition.type == newtype_type:
+                return definition
+        for module in self._imported_modules.values():
+            imported_definition = self._find_newtype_definition(module, newtype_type)
+            if imported_definition is not None:
+                return imported_definition
+        raise RuntimeError(f"Missing definition for newtype {newtype_type.symbol.name}")
+
+    def _find_record_definition(
+        self, module: ModuleType, record_type: RecordType
+    ) -> RecordDefinition | None:
+        for definition in module.records:
+            if definition.type == record_type:
+                return definition
+        return next(
+            (
+                found
+                for _, child in module.modules
+                if (found := self._find_record_definition(child, record_type)) is not None
+            ),
+            None,
+        )
+
+    def _find_enum_definition(
+        self, module: ModuleType, enum_type: EnumType
+    ) -> EnumDefinition | None:
+        for definition in module.enums:
+            if definition.type == enum_type:
+                return definition
+        return next(
+            (
+                found
+                for _, child in module.modules
+                if (found := self._find_enum_definition(child, enum_type)) is not None
+            ),
+            None,
+        )
+
+    def _find_newtype_definition(
+        self, module: ModuleType, newtype_type: NewtypeType
+    ) -> NewtypeDefinition | None:
+        for definition in module.newtypes:
+            if definition.type == newtype_type:
+                return definition
+        return next(
+            (
+                found
+                for _, child in module.modules
+                if (found := self._find_newtype_definition(child, newtype_type)) is not None
+            ),
+            None,
+        )
 
     def _infer_enum_construction(self, expression: EnumConstructionExpression) -> SemanticType:
-        enum_type = self._enum_types_by_name.get(expression.type_name)
+        candidate_type = self._lookup_type_name(expression.type_name)
+        enum_type = candidate_type if isinstance(candidate_type, EnumType) else None
         arguments = () if expression.arguments is None else expression.arguments
         if enum_type is None:
             for argument in arguments:
@@ -863,7 +1250,8 @@ class TypeChecker:
         )
 
     def _infer_record_construction(self, expression: RecordConstructionExpression) -> SemanticType:
-        record_type = self._record_types_by_name.get(expression.type_name)
+        candidate = self._lookup_type_name(expression.type_name)
+        record_type = candidate if isinstance(candidate, RecordType) else None
         if record_type is None:
             for initializer in expression.fields:
                 self._infer(initializer.value)
@@ -981,6 +1369,10 @@ class TypeChecker:
     def _infer_call(
         self, expression: CallExpression, expected: SemanticType | None = None
     ) -> SemanticType:
+        if isinstance(expression.callee, Identifier):
+            newtype_type = self._newtype_types_by_name.get(expression.callee.name)
+            if newtype_type is not None:
+                return self._infer_newtype_construction(expression, newtype_type)
         if isinstance(expression.callee, Identifier) and expression.callee.name in {
             "some",
             "ok",
@@ -988,6 +1380,8 @@ class TypeChecker:
         }:
             return self._infer_standard_constructor(expression, expression.callee.name, expected)
         callee_type = self._infer(expression.callee)
+        if isinstance(callee_type, NewtypeType):
+            return self._infer_newtype_construction(expression, callee_type)
         if callee_type is PrimitiveType.ERROR:
             for argument in expression.arguments:
                 self._infer(argument.value)
@@ -1069,6 +1463,46 @@ class TypeChecker:
             )
         return callee_type.return_type
 
+    def _lookup_type_name(self, name: str) -> ValueType | None:
+        local = (
+            self._record_types_by_name.get(name)
+            or self._enum_types_by_name.get(name)
+            or self._newtype_types_by_name.get(name)
+        )
+        return local if local is not None else self._resolve_imported_type(name)
+
+    def _infer_newtype_construction(
+        self, expression: CallExpression, newtype_type: NewtypeType
+    ) -> SemanticType:
+        definition = self._newtype_definition(newtype_type)
+        if len(expression.arguments) != 1:
+            for argument in expression.arguments:
+                self._infer(argument.value)
+            code = (
+                "TYPE_MISSING_ARGUMENT" if not expression.arguments else "TYPE_TOO_MANY_ARGUMENTS"
+            )
+            self._diagnose(
+                code,
+                f"Newtype '{newtype_type.symbol.name}' requires exactly one argument.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        argument = expression.arguments[0]
+        if argument.name is not None:
+            self._diagnose(
+                "TYPE_UNKNOWN_NAMED_ARGUMENT",
+                "Newtype constructors do not accept named arguments.",
+                argument.span,
+            )
+        actual = self._infer(argument.value, definition.underlying_type)
+        if not is_assignable(actual, definition.underlying_type):
+            self._diagnose(
+                "TYPE_MISMATCH",
+                f"Cannot construct {newtype_type.symbol.name} from {format_type(actual)}.",
+                argument.value.span,
+            )
+        return newtype_type
+
     def _infer_standard_constructor(
         self, expression: CallExpression, name: str, expected: SemanticType | None
     ) -> SemanticType:
@@ -1107,7 +1541,16 @@ class TypeChecker:
                 return optional_expected
             if isinstance(
                 payload_type,
-                (PrimitiveType, ListType, RecordType, EnumType, OptionalType, ResultType),
+                (
+                    PrimitiveType,
+                    ListType,
+                    MapType,
+                    RecordType,
+                    EnumType,
+                    NewtypeType,
+                    OptionalType,
+                    ResultType,
+                ),
             ):
                 return OptionalType(payload_type)
             self._diagnose(

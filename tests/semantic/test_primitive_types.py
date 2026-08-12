@@ -60,5 +60,5 @@ def test_unknown_and_generic_annotations_are_diagnosed(
 
     assert [diagnostic.code for diagnostic in result.diagnostics] == [
         "TYPE_UNKNOWN_TYPE",
-        "TYPE_UNKNOWN_TYPE",
+        "TYPE_INVALID_TYPE_ARGUMENTS",
     ]

@@ -30,10 +30,9 @@ def test_environment_uses_symbol_identity_and_parent_lookup() -> None:
         inner.assign(outer_symbol, 4)
 
 
-def test_future_map_execution_is_rejected(
+def test_map_literal_execution_is_supported(
     run_source: Callable[[str], PipelineResult],
 ) -> None:
     result = run_source('let values = {"one": 1}')
     assert result.execution is not None
-    assert result.execution.runtime_error is not None
-    assert result.execution.runtime_error.code == "RUNTIME_INVALID_OPERATION"
+    assert result.execution.runtime_error is None

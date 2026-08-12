@@ -78,7 +78,9 @@
         { "$ref": "#/$defs/functionDeclaration" },
         { "$ref": "#/$defs/recordDeclaration" },
         { "$ref": "#/$defs/enumDeclaration" },
-        { "$ref": "#/$defs/matchStatement" }
+        { "$ref": "#/$defs/matchStatement" },
+        { "$ref": "#/$defs/newtypeDeclaration" },
+        { "$ref": "#/$defs/importDeclaration" }
       ]
     },
     "program": {
@@ -647,6 +649,27 @@
       "allOf": [{ "$ref": "#/$defs/nodeBase" }, { "type": "object", "required": ["scrutinee", "cases"], "properties": {
         "kind": { "const": "match_statement" }, "scrutinee": { "$ref": "#/$defs/expression" }, "cases": { "type": "array", "items": { "$ref": "#/$defs/matchCase" } }
       } }], "unevaluatedProperties": false
+    },
+    "newtypeDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["name", "underlying_type"], "properties": {
+          "kind": { "const": "newtype_declaration" },
+          "name": { "type": "string" },
+          "underlying_type": { "$ref": "#/$defs/typeExpression" }
+        } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "importDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["path"], "properties": {
+          "kind": { "const": "import_declaration" },
+          "path": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        } }
+      ],
+      "unevaluatedProperties": false
     }
   }
 }

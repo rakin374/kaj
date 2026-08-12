@@ -3014,3 +3014,20 @@ Enum declarations preserve variant and payload-field source order. An enum const
 ordered array for constructor-call syntax. Match cases contain an enum pattern and one statement
 body, with pattern bindings preserved in source order. All nodes carry standard v1 spans and no
 resolved symbols, semantic types, exhaustiveness metadata, or runtime values.
+
+---
+
+# 75. Checkpoint 14 Newtype Declaration
+
+Checkpoint 14 adds the syntax-only `newtype_declaration` statement kind. It contains `name` and
+`underlying_type`, where the latter is an existing type-expression node. The node carries the
+ordinary v1 source span and contains no nominal type symbol, resolved underlying type, constructor
+metadata, or runtime wrapper.
+
+---
+
+# 76. Checkpoint 17 Import Declaration
+
+Checkpoint 17 adds `import_declaration` with a non-empty ordered `path` array of identifier
+segments. The syntax node contains no resolved filesystem path, loaded module AST, dependency
+graph, semantic namespace, or runtime environment.
