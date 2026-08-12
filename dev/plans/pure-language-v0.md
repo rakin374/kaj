@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 4 — AST JSON
+**Current checkpoint:** Checkpoint 5 — Scope and Name Resolution
 **Status:** Complete
 
 ## Completed
@@ -40,6 +40,16 @@
 - Structured AST JSON errors with stable codes and JSON field paths.
 - A Draft 2020-12 schema at `schemas/ast/v1.json` covering the complete v1 document contract.
 - Direct and parser-driven round-trip, invalid-input, span, numeric, Unicode, and schema tests.
+- Module, function, and block scopes with lexical parent lookup and read-only symbol views.
+- Compiler-internal symbols for functions, bindings, parameters, and loop variables, with
+  deterministic identities that distinguish shadowed declarations.
+- Top-level function predeclaration supporting forward calls, recursion, and mutual recursion,
+  while module bindings remain visible only according to source order.
+- Identity-based identifier-to-symbol resolution side tables without mutating the Core AST or
+  extending AST JSON v1.
+- Structured duplicate-name and unknown-name diagnostics with deterministic recovery.
+- Resolver conformance coverage for scope boundaries, initialization order, shadowing,
+  expressions, loops, function visibility, recovery, and AST JSON integration.
 
 ## Decisions Made During Checkpoint 1
 
@@ -107,17 +117,31 @@
 - The internal AST specification now lives at its consistently referenced canonical path,
   `docs/internals/ast.md`.
 
+## Decisions Made During Checkpoint 5
+
+- A function's parameters and direct body declarations share one `FUNCTION` scope; only nested
+  control-flow bodies introduce `BLOCK` scopes.
+- All top-level functions are predeclared, then module statements are resolved in source order.
+  Function bodies therefore see all module functions but only bindings declared earlier.
+- Binding initializers and `for` iterable expressions resolve before their new declaration is
+  inserted into scope.
+- Duplicate declarations retain the original active symbol and do not consume a symbol ID.
+- Resolution associations use exact identifier-node identity behind `ResolutionResult.symbol_for`,
+  so structurally equal AST nodes cannot be confused.
+- Type expressions, member names, and named-argument labels remain outside value-name lookup.
+- No implicit builtin scope is installed in Checkpoint 5.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–4 scope.
-- Name resolution, type checking, runtime behavior, formatting, AST patches, compiler IR, and
-  deferred language nodes remain intentionally unimplemented.
+- None within the completed Checkpoint 0–5 scope.
+- Type checking, runtime behavior, formatting, AST patches, compiler IR, and deferred language
+  nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 248 tests passed.
+- `pytest`: 268 tests passed.
 - `ruff check .`: passed.
-- `mypy src`: passed under strict mode for 19 source files.
+- `mypy src`: passed under strict mode for 23 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.
 - `python -m kaj`: prints `Kaj 0.0.1`.
 
