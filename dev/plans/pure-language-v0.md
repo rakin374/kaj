@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 6 — Primitive Type System
+**Current checkpoint:** Checkpoint 7 — Function Type Checking
 **Status:** Complete
 
 ## Completed
@@ -60,6 +60,16 @@
   mutability enforcement.
 - Type-checker conformance coverage for annotations, operators, promotion, recovery, shadowing,
   conditions, mutation, and AST JSON integration.
+- Explicit function signatures preserving ordered parameter names, primitive types, mutability,
+  and return types, predeclared before any function body is checked.
+- Positional, named, and mixed call mapping with arity, duplication, label, callable, and argument
+  compatibility diagnostics while preserving AST argument order.
+- Return compatibility, top-level return rejection, and conservative structural missing-return
+  analysis for direct returns and complete `if`/`else if`/`else` paths.
+- Self-recursive, mutually recursive, and forward function calls using resolver symbol identity and
+  predeclared semantic signatures.
+- Function conformance coverage for signatures, calls, parameter mapping, returns, recursion,
+  mutable parameters, recovery, and AST JSON integration.
 
 ## Decisions Made During Checkpoint 1
 
@@ -156,15 +166,30 @@
 - Function parameters receive primitive annotation types only to support local expression and
   mutability checks; Checkpoint 7 function signature, call, and return typing was not started.
 
+## Decisions Made During Checkpoint 7
+
+- `FunctionType` and ordered `FunctionParameterType` values extend the semantic type union; they
+  remain compiler side-table data and are not added to Core AST or AST JSON v1.
+- All top-level signatures are collected before module source-order body checking, preserving
+  recursion and forward-call behavior without changing module-binding visibility.
+- Call arguments are inferred in source order and associated with parameter descriptors in a
+  separate identity-based mapping; the AST is never reordered for named calls.
+- A known function call retains its declared return type after argument errors to prevent
+  unrelated downstream cascades.
+- Definite-return analysis is intentionally structural: loops never guarantee return, while an
+  `if` guarantees return only when every branch, including a final `else`, does.
+- Mutable parameters are reassignable local values only; no caller mutation, reference passing,
+  execution, or interpreter semantics were introduced.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–6 scope.
-- Function typing, collection and user-defined types, runtime behavior, formatting, AST patches,
-  compiler IR, and deferred language nodes remain intentionally unimplemented.
+- None within the completed Checkpoint 0–7 scope.
+- Collection and user-defined types, runtime behavior, formatting, AST patches, compiler IR, and
+  deferred language nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 311 tests passed.
+- `pytest`: 350 tests passed.
 - `ruff check .`: passed.
 - `mypy src`: passed under strict mode for 25 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.

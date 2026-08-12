@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -11,6 +14,22 @@ class PrimitiveType(Enum):
     ERROR = "<error>"
 
 
+@dataclass(frozen=True)
+class FunctionParameterType:
+    name: str
+    type: PrimitiveType
+    mutable: bool
+
+
+@dataclass(frozen=True)
+class FunctionType:
+    parameters: tuple[FunctionParameterType, ...]
+    return_type: PrimitiveType
+
+
+type SemanticType = PrimitiveType | FunctionType
+
+
 PRIMITIVE_TYPES_BY_NAME: dict[str, PrimitiveType] = {
     primitive.value: primitive
     for primitive in PrimitiveType
@@ -18,7 +37,14 @@ PRIMITIVE_TYPES_BY_NAME: dict[str, PrimitiveType] = {
 }
 
 
-def is_assignable(source: PrimitiveType, target: PrimitiveType) -> bool:
+def is_assignable(source: SemanticType, target: SemanticType) -> bool:
     if PrimitiveType.ERROR in (source, target):
         return True
-    return source is target or (source is PrimitiveType.INT and target is PrimitiveType.DECIMAL)
+    return source == target or (source is PrimitiveType.INT and target is PrimitiveType.DECIMAL)
+
+
+def format_type(semantic_type: SemanticType) -> str:
+    if isinstance(semantic_type, PrimitiveType):
+        return semantic_type.value
+    parameters = ", ".join(parameter.type.value for parameter in semantic_type.parameters)
+    return f"({parameters}) -> {semantic_type.return_type.value}"
