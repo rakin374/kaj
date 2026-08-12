@@ -12,8 +12,10 @@ from kaj.semantic.types import (
     BuiltinFunctionType,
     FunctionParameterType,
     FunctionType,
+    ListType,
     PrimitiveType,
     SemanticType,
+    ValueType,
     is_assignable,
 )
 
@@ -22,6 +24,7 @@ __all__ = [
     "DeclaredSymbol",
     "FunctionParameterType",
     "FunctionType",
+    "ListType",
     "MappedArgument",
     "PrimitiveType",
     "ResolutionResult",
@@ -36,5 +39,6 @@ __all__ = [
     "TypeChecker",
     "TypedExpression",
     "TypedSymbol",
+    "ValueType",
     "is_assignable",
 ]

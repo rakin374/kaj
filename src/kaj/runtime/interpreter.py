@@ -40,9 +40,10 @@ from kaj.ast import (
 from kaj.runtime.environment import Environment
 from kaj.runtime.errors import RuntimeErrorInfo, RuntimeFailure
 from kaj.runtime.output import BufferOutput, RuntimeOutput
-from kaj.runtime.values import BuiltinFunction, KajFunction, RuntimeValue
+from kaj.runtime.values import BuiltinFunction, KajFunction, KajList, RuntimeValue
 from kaj.semantic import (
     FunctionType,
+    ListType,
     PrimitiveType,
     ResolutionResult,
     SemanticType,
@@ -168,6 +169,21 @@ class Interpreter:
                 if condition is False:
                     break
                 self._execute_block(statement.body, Environment(environment))
+        elif isinstance(statement, ForStatement):
+            iterable = self._evaluate(statement.iterable, environment)
+            if not isinstance(iterable, KajList):
+                self._fail(
+                    "RUNTIME_INVALID_OPERATION",
+                    "For iterable is not a Kaj List.",
+                    statement.iterable.span,
+                )
+            symbol = self._resolution.symbol_for_declaration(statement)
+            if symbol is None:
+                self._fail("RUNTIME_INTERNAL_ERROR", "Loop variable has no symbol.", statement.span)
+            for element in iterable.elements:
+                iteration_environment = Environment(environment)
+                iteration_environment.define(symbol, element, mutable=False)
+                self._execute_block(statement.body, iteration_environment)
         elif isinstance(statement, ReturnStatement):
             if statement.value is None:
                 raise _ReturnSignal(None, PrimitiveType.NONE)
@@ -179,7 +195,7 @@ class Interpreter:
             self._execute_block(statement, Environment(environment))
         elif isinstance(statement, FunctionDeclaration):
             return
-        elif isinstance(statement, (ForStatement, BreakStatement, ContinueStatement)):
+        elif isinstance(statement, (BreakStatement, ContinueStatement)):
             self._fail(
                 "RUNTIME_INVALID_OPERATION",
                 f"{type(statement).__name__} is not executable in Checkpoint 8.",
@@ -270,13 +286,49 @@ class Interpreter:
             return self._evaluate_binary(expression, environment)
         if isinstance(expression, CallExpression):
             return self._evaluate_call(expression, environment)
-        if isinstance(
-            expression,
-            (ListLiteral, MapLiteral, MemberAccessExpression, IndexExpression),
-        ):
+        if isinstance(expression, ListLiteral):
+            list_type = self._expression_type(expression)
+            if not isinstance(list_type, ListType):
+                self._fail("RUNTIME_INTERNAL_ERROR", "List has no static List type.", expression.span)
+            elements = tuple(
+                self._coerce(
+                    self._evaluate(element, environment),
+                    self._expression_type(element),
+                    list_type.element_type,
+                    element.span,
+                )
+                for element in expression.elements
+            )
+            return KajList(elements)
+        if isinstance(expression, IndexExpression):
+            object_value = self._evaluate(expression.object, environment)
+            index_value = self._evaluate(expression.index, environment)
+            if not isinstance(object_value, KajList) or type(index_value) is not int:
+                self._fail(
+                    "RUNTIME_INVALID_OPERATION",
+                    "Index access requires a Kaj List and Int index.",
+                    expression.span,
+                )
+            if index_value < 0 or index_value >= len(object_value.elements):
+                self._fail(
+                    "RUNTIME_INDEX_OUT_OF_BOUNDS",
+                    f"List index {index_value} is out of bounds.",
+                    expression.index.span,
+                )
+            return object_value.elements[index_value]
+        if isinstance(expression, MemberAccessExpression):
+            object_value = self._evaluate(expression.object, environment)
+            if isinstance(object_value, KajList) and expression.member == "count":
+                return len(object_value.elements)
             self._fail(
                 "RUNTIME_INVALID_OPERATION",
-                f"{type(expression).__name__} is not executable in Checkpoint 8.",
+                f"Unsupported runtime member '{expression.member}'.",
+                expression.span,
+            )
+        if isinstance(expression, MapLiteral):
+            self._fail(
+                "RUNTIME_INVALID_OPERATION",
+                f"{type(expression).__name__} is not executable in Checkpoint 9.",
                 expression.span,
             )
         self._fail(

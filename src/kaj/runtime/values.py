@@ -10,6 +10,11 @@ from kaj.semantic import FunctionType, Symbol
 
 
 @dataclass(frozen=True)
+class KajList:
+    elements: tuple[RuntimeValue, ...]
+
+
+@dataclass(frozen=True)
 class KajFunction:
     declaration: FunctionDeclaration
     symbol: Symbol
@@ -21,4 +26,6 @@ class BuiltinFunction(Enum):
     PRINT = "print"
 
 
-type RuntimeValue = bool | int | Decimal | str | bytes | None | KajFunction | BuiltinFunction
+type RuntimeValue = (
+    bool | int | Decimal | str | bytes | None | KajList | KajFunction | BuiltinFunction
+)

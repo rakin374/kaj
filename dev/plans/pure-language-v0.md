@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 8 — Reference Interpreter Core
+**Current checkpoint:** Checkpoint 9 — Lists
 **Status:** Complete
 
 ## Completed
@@ -80,6 +80,16 @@
   primitive formatting and an injectable output sink.
 - Structured runtime failures for division by zero, invalid operations, and internal-state errors,
   plus conformance coverage including the factorial acceptance program.
+- Recursive semantic `List<T>` types with exact generic arity validation, homogeneous literal
+  inference, narrow numeric common typing, and invariant list assignment.
+- Contextual list-literal construction for annotated bindings, assignments, function arguments,
+  and returns, including element-level `Int` to `Decimal` promotion and typed empty lists.
+- Statically typed zero-based indexing, the explicit `count` property, and immutable `for`
+  variables whose types come from list elements.
+- A controlled `KajList` runtime value with left-to-right construction, bounds-checked indexing,
+  explicit member dispatch, deterministic iteration order, and fresh per-iteration environments.
+- List conformance coverage for nested lists, annotations, functions, rebinding, scope identity,
+  iteration, runtime promotion, and structured bounds errors.
 
 ## Decisions Made During Checkpoint 1
 
@@ -209,15 +219,30 @@
 - Runtime errors terminate execution and are returned as `RuntimeErrorInfo`; expected failures do
   not expose host exceptions.
 
+## Decisions Made During Checkpoint 9
+
+- `ListType` recursively contains only supported Kaj value types; semantic equality is structural
+  and existing list values are invariant under assignment and calls.
+- Literal context is construction-specific: `List<Decimal> = [1, 2]` promotes each element, while
+  an existing `List<Int>` is never implicitly converted to `List<Decimal>`.
+- Empty literals require a contextual `List<T>`; context-free empty literals produce
+  `TYPE_CANNOT_INFER_LIST_ELEMENT` without inventing `Any` or a bottom collection type.
+- List indexing is zero-based and negative indices are rejected explicitly, preventing Python's
+  negative-index behavior from leaking into Kaj.
+- Only `count` is exposed as a list member. Python collection methods, list printing, arithmetic,
+  equality, truthiness, slicing, and mutation APIs remain unavailable.
+- `for` evaluates its list once and creates a fresh symbol-identity block environment per element;
+  existing return unwinding propagates through the loop unchanged.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–8 scope.
-- Collection execution and typing, user-defined types, formatting, AST patches, compiler IR, and
+- None within the completed Checkpoint 0–9 scope.
+- Maps and later collections, user-defined types, formatting, AST patches, compiler IR, and
   deferred language nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 375 tests passed.
+- `pytest`: 409 tests passed.
 - `ruff check .`: passed.
 - `mypy src`: passed under strict mode for 31 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.

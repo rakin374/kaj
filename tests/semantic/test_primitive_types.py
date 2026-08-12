@@ -56,7 +56,7 @@ def test_annotation_mismatch_preserves_declared_type(
 def test_unknown_and_generic_annotations_are_diagnosed(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
-    result = check_source("let x: Foo = 1\nlet y: List<Int> = 2")
+    result = check_source("let x: Foo = 1\nlet y: Map<Int> = 2")
 
     assert [diagnostic.code for diagnostic in result.diagnostics] == [
         "TYPE_UNKNOWN_TYPE",

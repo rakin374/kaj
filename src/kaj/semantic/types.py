@@ -15,23 +15,31 @@ class PrimitiveType(Enum):
 
 
 @dataclass(frozen=True)
+class ListType:
+    element_type: PrimitiveType | ListType
+
+
+type ValueType = PrimitiveType | ListType
+
+
+@dataclass(frozen=True)
 class FunctionParameterType:
     name: str
-    type: PrimitiveType
+    type: ValueType
     mutable: bool
 
 
 @dataclass(frozen=True)
 class FunctionType:
     parameters: tuple[FunctionParameterType, ...]
-    return_type: PrimitiveType
+    return_type: ValueType
 
 
 class BuiltinFunctionType(Enum):
     PRINT = "print"
 
 
-type SemanticType = PrimitiveType | FunctionType | BuiltinFunctionType
+type SemanticType = ValueType | FunctionType | BuiltinFunctionType
 
 
 PRIMITIVE_TYPES_BY_NAME: dict[str, PrimitiveType] = {
@@ -52,5 +60,7 @@ def format_type(semantic_type: SemanticType) -> str:
         return semantic_type.value
     if isinstance(semantic_type, BuiltinFunctionType):
         return f"<builtin {semantic_type.value}>"
-    parameters = ", ".join(parameter.type.value for parameter in semantic_type.parameters)
-    return f"({parameters}) -> {semantic_type.return_type.value}"
+    if isinstance(semantic_type, ListType):
+        return f"List<{format_type(semantic_type.element_type)}>"
+    parameters = ", ".join(format_type(parameter.type) for parameter in semantic_type.parameters)
+    return f"({parameters}) -> {format_type(semantic_type.return_type)}"

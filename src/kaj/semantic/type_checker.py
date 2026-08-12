@@ -47,8 +47,10 @@ from kaj.semantic.types import (
     BuiltinFunctionType,
     FunctionParameterType,
     FunctionType,
+    ListType,
     PrimitiveType,
     SemanticType,
+    ValueType,
     format_type,
     is_assignable,
 )
@@ -116,7 +118,7 @@ class TypeChecker:
         self._function_types: dict[int, FunctionType] = {}
         self._mapped_arguments: list[MappedArgument] = []
         self._diagnostics: list[Diagnostic] = []
-        self._current_return_type: PrimitiveType | None = None
+        self._current_return_type: ValueType | None = None
 
     def check(self, program: Program) -> TypeCheckResult:
         self._expression_types = {}
@@ -178,12 +180,30 @@ class TypeChecker:
     def _diagnose(self, code: str, message: str, span: SourceSpan) -> None:
         self._diagnostics.append(Diagnostic(code=code, message=message, span=span))
 
-    def _resolve_annotation(self, annotation: TypeExpression) -> PrimitiveType:
+    def _resolve_annotation(self, annotation: TypeExpression) -> ValueType:
         if isinstance(annotation, NamedType):
             primitive = PRIMITIVE_TYPES_BY_NAME.get(annotation.name)
             if primitive is not None:
                 return primitive
-        elif not isinstance(annotation, GenericType):
+            if annotation.name == "List":
+                self._diagnose(
+                    "TYPE_INVALID_TYPE_ARGUMENTS",
+                    "List requires exactly one type argument.",
+                    annotation.span,
+                )
+                return PrimitiveType.ERROR
+        elif isinstance(annotation, GenericType):
+            if annotation.base.name == "List":
+                if len(annotation.arguments) != 1:
+                    self._diagnose(
+                        "TYPE_INVALID_TYPE_ARGUMENTS",
+                        "List requires exactly one type argument.",
+                        annotation.span,
+                    )
+                    return PrimitiveType.ERROR
+                element_type = self._resolve_annotation(annotation.arguments[0])
+                return ListType(element_type)
+        else:
             raise TypeError(f"Unsupported type expression: {type(annotation).__name__}")
         self._diagnose(
             "TYPE_UNKNOWN_TYPE",
@@ -198,7 +218,7 @@ class TypeChecker:
             if declaration.annotation is not None
             else None
         )
-        initializer_type = self._infer(declaration.initializer)
+        initializer_type = self._infer(declaration.initializer, declared_type)
         symbol = self._resolution.symbol_for_declaration(declaration)
         static_type = initializer_type if declared_type is None else declared_type
         if declared_type is not None and not is_assignable(initializer_type, declared_type):
@@ -211,7 +231,7 @@ class TypeChecker:
             self._record_symbol(symbol, static_type)
             self._mutable_symbols[symbol.id] = symbol.kind is SymbolKind.VAR_BINDING
 
-    def _check_parameter(self, parameter: Parameter, semantic_type: PrimitiveType) -> None:
+    def _check_parameter(self, parameter: Parameter, semantic_type: ValueType) -> None:
         symbol = self._resolution.symbol_for_declaration(parameter)
         if symbol is not None:
             self._record_symbol(symbol, semantic_type)
@@ -235,10 +255,22 @@ class TypeChecker:
             self._check_condition(statement.condition)
             self._check_block(statement.body)
         elif isinstance(statement, ForStatement):
-            self._infer(statement.iterable)
+            iterable_type = self._infer(statement.iterable)
             symbol = self._resolution.symbol_for_declaration(statement)
             if symbol is not None:
-                self._record_symbol(symbol, PrimitiveType.ERROR)
+                if isinstance(iterable_type, ListType):
+                    self._record_symbol(symbol, iterable_type.element_type)
+                    self._mutable_symbols[symbol.id] = False
+                else:
+                    self._record_symbol(symbol, PrimitiveType.ERROR)
+            if iterable_type is not PrimitiveType.ERROR and not isinstance(
+                iterable_type, ListType
+            ):
+                self._diagnose(
+                    "TYPE_NOT_ITERABLE",
+                    f"Type {format_type(iterable_type)} is not iterable.",
+                    statement.iterable.span,
+                )
             self._check_block(statement.body)
         elif isinstance(statement, FunctionDeclaration):
             signature = self._function_types.get(id(statement))
@@ -287,7 +319,16 @@ class TypeChecker:
 
     def _check_assignment(self, statement: AssignmentStatement) -> None:
         target_type = self._infer(statement.target)
-        value_type = self._infer(statement.value)
+        value_type = self._infer(statement.value, target_type)
+        if isinstance(statement.target, IndexExpression) and isinstance(
+            self._recorded_expression_type(statement.target.object), ListType
+        ):
+            self._diagnose(
+                "TYPE_MISMATCH",
+                "List index assignment is not supported in Kaj v0 Checkpoint 9.",
+                statement.target.span,
+            )
+            return
         symbol = (
             self._resolution.symbol_for(statement.target)
             if isinstance(statement.target, Identifier)
@@ -318,7 +359,13 @@ class TypeChecker:
                 statement.value.span,
             )
 
-    def _infer(self, expression: Expression) -> SemanticType:
+    def _recorded_expression_type(self, expression: Expression) -> SemanticType | None:
+        typed = self._expression_types.get(id(expression))
+        return None if typed is None else typed.type
+
+    def _infer(
+        self, expression: Expression, expected: SemanticType | None = None
+    ) -> SemanticType:
         result: SemanticType
         if isinstance(expression, BooleanLiteral):
             result = PrimitiveType.BOOL
@@ -341,16 +388,34 @@ class TypeChecker:
         elif isinstance(expression, CallExpression):
             result = self._infer_call(expression)
         elif isinstance(expression, MemberAccessExpression):
-            self._infer(expression.object)
-            result = PrimitiveType.ERROR
+            object_type = self._infer(expression.object)
+            if isinstance(object_type, ListType):
+                if expression.member == "count":
+                    result = PrimitiveType.INT
+                else:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_MEMBER",
+                        f"List has no member '{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
+            else:
+                result = PrimitiveType.ERROR
         elif isinstance(expression, IndexExpression):
-            self._infer(expression.object)
-            self._infer(expression.index)
-            result = PrimitiveType.ERROR
+            object_type = self._infer(expression.object)
+            index_type = self._infer(expression.index)
+            if index_type not in (PrimitiveType.INT, PrimitiveType.ERROR):
+                self._diagnose(
+                    "TYPE_MISMATCH",
+                    f"List index must be Int, not {format_type(index_type)}.",
+                    expression.index.span,
+                )
+            if isinstance(object_type, ListType):
+                result = object_type.element_type
+            else:
+                result = PrimitiveType.ERROR
         elif isinstance(expression, ListLiteral):
-            for element in expression.elements:
-                self._infer(element)
-            result = PrimitiveType.ERROR
+            result = self._infer_list(expression, expected)
         elif isinstance(expression, MapLiteral):
             for entry in expression.entries:
                 self._infer(entry.key)
@@ -359,6 +424,54 @@ class TypeChecker:
         else:
             raise TypeError(f"Unsupported expression node: {type(expression).__name__}")
         return self._record_expression(expression, result)
+
+    def _infer_list(
+        self, expression: ListLiteral, expected: SemanticType | None
+    ) -> SemanticType:
+        if isinstance(expected, ListType):
+            for element in expression.elements:
+                element_type = self._infer(element, expected.element_type)
+                if not is_assignable(element_type, expected.element_type):
+                    self._diagnose(
+                        "TYPE_MISMATCH",
+                        f"Cannot use {format_type(element_type)} in "
+                        f"{format_type(expected)}.",
+                        element.span,
+                    )
+            return expected
+        if not expression.elements:
+            self._diagnose(
+                "TYPE_CANNOT_INFER_LIST_ELEMENT",
+                "Cannot infer the element type of an empty list.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        element_types = [self._infer(element) for element in expression.elements]
+        known = [item for item in element_types if item is not PrimitiveType.ERROR]
+        if not known:
+            return PrimitiveType.ERROR
+        common = known[0]
+        for item in known[1:]:
+            if item == common:
+                continue
+            if {item, common} == {PrimitiveType.INT, PrimitiveType.DECIMAL}:
+                common = PrimitiveType.DECIMAL
+                continue
+            self._diagnose(
+                "TYPE_MISMATCH",
+                f"List elements {format_type(common)} and {format_type(item)} "
+                "have no common type.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        if isinstance(common, (PrimitiveType, ListType)):
+            return ListType(common)
+        self._diagnose(
+            "TYPE_MISMATCH",
+            "List elements must have a supported value type.",
+            expression.span,
+        )
+        return PrimitiveType.ERROR
 
     def _infer_unary(self, expression: UnaryExpression) -> PrimitiveType:
         operand = self._infer(expression.operand)
@@ -392,7 +505,7 @@ class TypeChecker:
             if left is right is PrimitiveType.BOOL:
                 return PrimitiveType.BOOL
         elif operator in (BinaryOperator.EQUAL, BinaryOperator.NOT_EQUAL):
-            if left is right or both_numeric:
+            if (isinstance(left, PrimitiveType) and left is right) or both_numeric:
                 return PrimitiveType.BOOL
         elif operator in (
             BinaryOperator.LESS,
@@ -427,12 +540,16 @@ class TypeChecker:
 
     def _infer_call(self, expression: CallExpression) -> SemanticType:
         callee_type = self._infer(expression.callee)
-        argument_types = [self._infer(argument.value) for argument in expression.arguments]
         if callee_type is PrimitiveType.ERROR:
+            for argument in expression.arguments:
+                self._infer(argument.value)
             return PrimitiveType.ERROR
         if callee_type is BuiltinFunctionType.PRINT:
+            argument_types = [self._infer(argument.value) for argument in expression.arguments]
             return self._infer_print_call(expression, argument_types)
         if not isinstance(callee_type, FunctionType):
+            for argument in expression.arguments:
+                self._infer(argument.value)
             self._diagnose(
                 "TYPE_NOT_CALLABLE",
                 f"Value of type {format_type(callee_type)} is not callable.",
@@ -442,9 +559,7 @@ class TypeChecker:
 
         assigned: set[int] = set()
         next_positional = 0
-        for argument, argument_type in zip(
-            expression.arguments, argument_types, strict=True
-        ):
+        for argument in expression.arguments:
             parameter_index: int | None
             if argument.name is None:
                 parameter_index = next_positional
@@ -455,6 +570,7 @@ class TypeChecker:
                         "Call has too many positional arguments.",
                         argument.span,
                     )
+                    self._infer(argument.value)
                     continue
             else:
                 parameter_index = next(
@@ -471,7 +587,10 @@ class TypeChecker:
                         f"Unknown named argument '{argument.name}'.",
                         argument.span,
                     )
+                    self._infer(argument.value)
                     continue
+            parameter = callee_type.parameters[parameter_index]
+            argument_type = self._infer(argument.value, parameter.type)
             if parameter_index in assigned:
                 self._diagnose(
                     "TYPE_DUPLICATE_ARGUMENT",
@@ -480,7 +599,6 @@ class TypeChecker:
                 )
                 continue
             assigned.add(parameter_index)
-            parameter = callee_type.parameters[parameter_index]
             self._mapped_arguments.append(
                 MappedArgument(argument, parameter, parameter_index)
             )
@@ -488,7 +606,7 @@ class TypeChecker:
                 self._diagnose(
                     "TYPE_MISMATCH",
                     f"Cannot pass {format_type(argument_type)} to parameter "
-                    f"'{parameter.name}' of type {parameter.type.value}.",
+                    f"'{parameter.name}' of type {format_type(parameter.type)}.",
                     argument.value.span,
                 )
 
@@ -559,14 +677,14 @@ class TypeChecker:
         actual = (
             PrimitiveType.NONE
             if statement.value is None
-            else self._infer(statement.value)
+            else self._infer(statement.value, self._current_return_type)
         )
         if not is_assignable(actual, self._current_return_type):
             span = statement.span if statement.value is None else statement.value.span
             self._diagnose(
                 "TYPE_MISMATCH",
                 f"Cannot return {format_type(actual)} from a function returning "
-                f"{self._current_return_type.value}.",
+                f"{format_type(self._current_return_type)}.",
                 span,
             )
 
