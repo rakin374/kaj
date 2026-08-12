@@ -75,7 +75,8 @@ class ResolutionResult:
 
 
 class Resolver:
-    def __init__(self) -> None:
+    def __init__(self, *, include_builtins: bool = False) -> None:
+        self._include_builtins = include_builtins
         self._next_symbol_id = 0
         self._symbols: list[Symbol] = []
         self._references: list[ResolvedReference] = []
@@ -88,7 +89,13 @@ class Resolver:
         self._references = []
         self._declarations = []
         self._diagnostics = []
-        module_scope = Scope(ScopeKind.MODULE)
+        builtin_scope = Scope(ScopeKind.MODULE) if self._include_builtins else None
+        if builtin_scope is not None:
+            print_symbol = self._new_symbol(
+                "print", SymbolKind.BUILTIN_FUNCTION, program.span
+            )
+            builtin_scope.declare(print_symbol)
+        module_scope = Scope(ScopeKind.MODULE, builtin_scope)
 
         for statement in program.statements:
             if isinstance(statement, FunctionDeclaration):

@@ -44,6 +44,7 @@ from kaj.semantic.resolver import ResolutionResult
 from kaj.semantic.symbols import Symbol, SymbolKind
 from kaj.semantic.types import (
     PRIMITIVE_TYPES_BY_NAME,
+    BuiltinFunctionType,
     FunctionParameterType,
     FunctionType,
     PrimitiveType,
@@ -99,6 +100,12 @@ class TypeCheckResult:
                 return mapped.parameter
         return None
 
+    def mapping_for_argument(self, argument: CallArgument) -> MappedArgument | None:
+        for mapped in self.arguments:
+            if mapped.argument is argument:
+                return mapped
+        return None
+
 
 class TypeChecker:
     def __init__(self, resolution: ResolutionResult) -> None:
@@ -119,6 +126,9 @@ class TypeChecker:
         self._mapped_arguments = []
         self._diagnostics = []
         self._current_return_type = None
+        for symbol in self._resolution.symbols:
+            if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name == "print":
+                self._record_symbol(symbol, BuiltinFunctionType.PRINT)
         for statement in program.statements:
             if isinstance(statement, FunctionDeclaration):
                 self._declare_function_signature(statement)
@@ -420,6 +430,8 @@ class TypeChecker:
         argument_types = [self._infer(argument.value) for argument in expression.arguments]
         if callee_type is PrimitiveType.ERROR:
             return PrimitiveType.ERROR
+        if callee_type is BuiltinFunctionType.PRINT:
+            return self._infer_print_call(expression, argument_types)
         if not isinstance(callee_type, FunctionType):
             self._diagnose(
                 "TYPE_NOT_CALLABLE",
@@ -492,6 +504,47 @@ class TypeChecker:
                 expression.span,
             )
         return callee_type.return_type
+
+    def _infer_print_call(
+        self, expression: CallExpression, argument_types: list[SemanticType]
+    ) -> PrimitiveType:
+        if any(argument.name is not None for argument in expression.arguments):
+            for argument in expression.arguments:
+                if argument.name is not None:
+                    self._diagnose(
+                        "TYPE_UNKNOWN_NAMED_ARGUMENT",
+                        "Builtin 'print' does not accept named arguments.",
+                        argument.span,
+                    )
+        if len(expression.arguments) == 0:
+            self._diagnose(
+                "TYPE_MISSING_ARGUMENT",
+                "Builtin 'print' requires one argument.",
+                expression.span,
+            )
+        elif len(expression.arguments) > 1:
+            self._diagnose(
+                "TYPE_TOO_MANY_ARGUMENTS",
+                "Builtin 'print' accepts exactly one argument.",
+                expression.span,
+            )
+        if argument_types:
+            printable = {
+                PrimitiveType.BOOL,
+                PrimitiveType.INT,
+                PrimitiveType.DECIMAL,
+                PrimitiveType.STRING,
+                PrimitiveType.BYTES,
+                PrimitiveType.NONE,
+                PrimitiveType.ERROR,
+            }
+            if argument_types[0] not in printable:
+                self._diagnose(
+                    "TYPE_MISMATCH",
+                    f"Builtin 'print' cannot print {format_type(argument_types[0])}.",
+                    expression.arguments[0].value.span,
+                )
+        return PrimitiveType.NONE
 
     def _check_return(self, statement: ReturnStatement) -> None:
         if self._current_return_type is None:

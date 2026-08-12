@@ -5,6 +5,7 @@ from kaj.source import SourceSpan
 
 
 class SymbolKind(Enum):
+    BUILTIN_FUNCTION = auto()
     FUNCTION = auto()
     LET_BINDING = auto()
     VAR_BINDING = auto()

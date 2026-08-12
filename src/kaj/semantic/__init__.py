@@ -9,6 +9,7 @@ from kaj.semantic.type_checker import (
     TypedSymbol,
 )
 from kaj.semantic.types import (
+    BuiltinFunctionType,
     FunctionParameterType,
     FunctionType,
     PrimitiveType,
@@ -17,6 +18,7 @@ from kaj.semantic.types import (
 )
 
 __all__ = [
+    "BuiltinFunctionType",
     "DeclaredSymbol",
     "FunctionParameterType",
     "FunctionType",

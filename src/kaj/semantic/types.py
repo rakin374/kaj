@@ -27,7 +27,11 @@ class FunctionType:
     return_type: PrimitiveType
 
 
-type SemanticType = PrimitiveType | FunctionType
+class BuiltinFunctionType(Enum):
+    PRINT = "print"
+
+
+type SemanticType = PrimitiveType | FunctionType | BuiltinFunctionType
 
 
 PRIMITIVE_TYPES_BY_NAME: dict[str, PrimitiveType] = {
@@ -46,5 +50,7 @@ def is_assignable(source: SemanticType, target: SemanticType) -> bool:
 def format_type(semantic_type: SemanticType) -> str:
     if isinstance(semantic_type, PrimitiveType):
         return semantic_type.value
+    if isinstance(semantic_type, BuiltinFunctionType):
+        return f"<builtin {semantic_type.value}>"
     parameters = ", ".join(parameter.type.value for parameter in semantic_type.parameters)
     return f"({parameters}) -> {semantic_type.return_type.value}"

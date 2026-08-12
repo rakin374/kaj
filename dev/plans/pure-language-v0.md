@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 7 — Function Type Checking
+**Current checkpoint:** Checkpoint 8 — Reference Interpreter Core
 **Status:** Complete
 
 ## Completed
@@ -70,6 +70,16 @@
   predeclared semantic signatures.
 - Function conformance coverage for signatures, calls, parameter mapping, returns, recursion,
   mutable parameters, recovery, and AST JSON integration.
+- A Python reference interpreter using explicit symbol-identity environments for builtins,
+  modules, function calls, and nested runtime blocks.
+- Exact primitive execution with arbitrary-precision integers, `Decimal` arithmetic under a
+  deterministic 34-digit local context, short-circuit Boolean operators, and no float leakage.
+- Runtime bindings, identifier assignment, compound assignment, `if`, `while`, function calls,
+  recursion, return unwinding, and materialized `Int` to `Decimal` boundary conversions.
+- An explicit host builtin scope containing only narrowly typed `print`, with deterministic
+  primitive formatting and an injectable output sink.
+- Structured runtime failures for division by zero, invalid operations, and internal-state errors,
+  plus conformance coverage including the factorial acceptance program.
 
 ## Decisions Made During Checkpoint 1
 
@@ -181,17 +191,35 @@
 - Mutable parameters are reassignable local values only; no caller mutation, reference passing,
   execution, or interpreter semantics were introduced.
 
+## Decisions Made During Checkpoint 8
+
+- Builtins are opt-in through `Resolver(include_builtins=True)`, preserving Checkpoint 5's default
+  no-implicit-builtins behavior while placing `print` in an outer lexical scope that can be
+  shadowed normally.
+- Runtime slots are keyed by compiler symbol identity and carry defensive mutability metadata;
+  no Python variable generation, `eval`, `exec`, globals, or locals are used.
+- Function declarations are installed before module execution and capture only the module
+  environment, matching Kaj v0's top-level-only named-function model without adding closures.
+- Call arguments evaluate left-to-right in AST order and use Checkpoint 7's side-table mapping for
+  parameter binding; every invocation receives a fresh call environment.
+- Approved `Int` to `Decimal` conversions are materialized at binding, assignment, argument, and
+  return boundaries, as well as mixed numeric operations.
+- Unsupported collections, indexing, member access, `for`, `break`, and `continue` fail with a
+  structured runtime error rather than acquiring accidental Python semantics.
+- Runtime errors terminate execution and are returned as `RuntimeErrorInfo`; expected failures do
+  not expose host exceptions.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–7 scope.
-- Collection and user-defined types, runtime behavior, formatting, AST patches, compiler IR, and
+- None within the completed Checkpoint 0–8 scope.
+- Collection execution and typing, user-defined types, formatting, AST patches, compiler IR, and
   deferred language nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 350 tests passed.
+- `pytest`: 375 tests passed.
 - `ruff check .`: passed.
-- `mypy src`: passed under strict mode for 25 source files.
+- `mypy src`: passed under strict mode for 31 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.
 - `python -m kaj`: prints `Kaj 0.0.1`.
 
