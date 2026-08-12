@@ -5,7 +5,7 @@ import pytest
 from kaj.ast import Program
 from kaj.lexer import Lexer
 from kaj.parser import Parser
-from kaj.semantic import ResolutionResult, Resolver
+from kaj.semantic import ResolutionResult, Resolver, TypeChecker, TypeCheckResult
 
 
 @pytest.fixture
@@ -26,3 +26,13 @@ def resolve_source(parse_program: Callable[[str], Program]) -> Callable[[str], R
         return Resolver().resolve(parse_program(source))
 
     return resolve
+
+
+@pytest.fixture
+def check_source(parse_program: Callable[[str], Program]) -> Callable[[str], TypeCheckResult]:
+    def check(source: str) -> TypeCheckResult:
+        program = parse_program(source)
+        resolution = Resolver().resolve(program)
+        return TypeChecker(resolution).check(program)
+
+    return check

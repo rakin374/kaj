@@ -24,6 +24,7 @@ from kaj.ast import (
     ListLiteral,
     MapLiteral,
     MemberAccessExpression,
+    Node,
     NoneLiteral,
     Program,
     ReturnStatement,
@@ -45,10 +46,17 @@ class ResolvedReference:
 
 
 @dataclass(frozen=True)
+class DeclaredSymbol:
+    declaration: Node
+    symbol: Symbol
+
+
+@dataclass(frozen=True)
 class ResolutionResult:
     module_scope: Scope
     symbols: tuple[Symbol, ...]
     references: tuple[ResolvedReference, ...]
+    declarations: tuple[DeclaredSymbol, ...]
     diagnostics: tuple[Diagnostic, ...]
 
     def symbol_for(self, identifier: Identifier) -> Symbol | None:
@@ -58,18 +66,27 @@ class ResolutionResult:
                 return reference.symbol
         return None
 
+    def symbol_for_declaration(self, declaration: Node) -> Symbol | None:
+        """Return the symbol introduced by this exact declaration node."""
+        for association in self.declarations:
+            if association.declaration is declaration:
+                return association.symbol
+        return None
+
 
 class Resolver:
     def __init__(self) -> None:
         self._next_symbol_id = 0
         self._symbols: list[Symbol] = []
         self._references: list[ResolvedReference] = []
+        self._declarations: list[DeclaredSymbol] = []
         self._diagnostics: list[Diagnostic] = []
 
     def resolve(self, program: Program) -> ResolutionResult:
         self._next_symbol_id = 0
         self._symbols = []
         self._references = []
+        self._declarations = []
         self._diagnostics = []
         module_scope = Scope(ScopeKind.MODULE)
 
@@ -80,6 +97,7 @@ class Resolver:
                     statement.name,
                     SymbolKind.FUNCTION,
                     statement.span,
+                    statement,
                 )
 
         for statement in program.statements:
@@ -92,6 +110,7 @@ class Resolver:
             module_scope=module_scope,
             symbols=tuple(self._symbols),
             references=tuple(self._references),
+            declarations=tuple(self._declarations),
             diagnostics=tuple(self._diagnostics),
         )
 
@@ -102,7 +121,12 @@ class Resolver:
         return symbol
 
     def _declare(
-        self, scope: Scope, name: str, kind: SymbolKind, span: SourceSpan
+        self,
+        scope: Scope,
+        name: str,
+        kind: SymbolKind,
+        span: SourceSpan,
+        declaration: Node,
     ) -> Symbol | None:
         if scope.lookup_local(name) is not None:
             self._diagnostics.append(
@@ -115,6 +139,7 @@ class Resolver:
             return None
         symbol = self._new_symbol(name, kind, span)
         scope.declare(symbol)
+        self._declarations.append(DeclaredSymbol(declaration, symbol))
         return symbol
 
     def _resolve_function(self, declaration: FunctionDeclaration, module_scope: Scope) -> None:
@@ -125,6 +150,7 @@ class Resolver:
                 parameter.name,
                 SymbolKind.PARAMETER,
                 parameter.span,
+                parameter,
             )
         self._resolve_statements(declaration.body.statements, function_scope)
 
@@ -143,7 +169,7 @@ class Resolver:
                 if statement.kind is BindingKind.LET
                 else SymbolKind.VAR_BINDING
             )
-            self._declare(scope, statement.name, kind, statement.span)
+            self._declare(scope, statement.name, kind, statement.span, statement)
         elif isinstance(statement, AssignmentStatement):
             self._resolve_expression(statement.target, scope)
             self._resolve_expression(statement.value, scope)
@@ -162,7 +188,13 @@ class Resolver:
         elif isinstance(statement, ForStatement):
             self._resolve_expression(statement.iterable, scope)
             body_scope = Scope(ScopeKind.BLOCK, scope)
-            self._declare(body_scope, statement.name, SymbolKind.LOOP_VARIABLE, statement.span)
+            self._declare(
+                body_scope,
+                statement.name,
+                SymbolKind.LOOP_VARIABLE,
+                statement.span,
+                statement,
+            )
             self._resolve_statements(statement.body.statements, body_scope)
         elif isinstance(statement, ReturnStatement):
             if statement.value is not None:

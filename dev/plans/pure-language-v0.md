@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 5 — Scope and Name Resolution
+**Current checkpoint:** Checkpoint 6 — Primitive Type System
 **Status:** Complete
 
 ## Completed
@@ -50,6 +50,16 @@
 - Structured duplicate-name and unknown-name diagnostics with deterministic recovery.
 - Resolver conformance coverage for scope boundaries, initialization order, shadowing,
   expressions, loops, function visibility, recovery, and AST JSON integration.
+- Explicit semantic types for `Bool`, `Int`, `Decimal`, `String`, `Bytes`, and `None`, plus an
+  internal error sentinel for recovery without cascaded diagnostics.
+- Primitive literal and binding inference, annotation resolution, and identity-based expression
+  and symbol type side tables that leave the Core AST unchanged.
+- Frozen primitive operator tables, including exact `Int` to `Decimal` widening and
+  `Int / Int -> Decimal` behavior.
+- Bool-only conditions, assignment compatibility, compound assignment, and binding/parameter
+  mutability enforcement.
+- Type-checker conformance coverage for annotations, operators, promotion, recovery, shadowing,
+  conditions, mutation, and AST JSON integration.
 
 ## Decisions Made During Checkpoint 1
 
@@ -131,17 +141,32 @@
 - Type expressions, member names, and named-argument labels remain outside value-name lookup.
 - No implicit builtin scope is installed in Checkpoint 5.
 
+## Decisions Made During Checkpoint 6
+
+- Semantic types use `PrimitiveType` enum members rather than source-name strings; `ERROR` is an
+  internal sentinel and is never serialized or exposed as a Kaj source type.
+- The type checker consumes the resolver's exact declaration/reference associations and never
+  repeats lexical lookup by name.
+- An annotated binding retains its declared semantic type after an initializer mismatch so later
+  references can be checked deterministically.
+- Binary operand incompatibilities use `TYPE_MISMATCH`; unsupported unary operand/operator pairs
+  use `TYPE_INVALID_OPERATOR`.
+- Calls, collections, member access, indexing, loop element types, function signatures, and return
+  compatibility use controlled deferred/error typing without speculative `Any` semantics.
+- Function parameters receive primitive annotation types only to support local expression and
+  mutability checks; Checkpoint 7 function signature, call, and return typing was not started.
+
 ## Known Issues
 
-- None within the completed Checkpoint 0–5 scope.
-- Type checking, runtime behavior, formatting, AST patches, compiler IR, and deferred language
-  nodes remain intentionally unimplemented.
+- None within the completed Checkpoint 0–6 scope.
+- Function typing, collection and user-defined types, runtime behavior, formatting, AST patches,
+  compiler IR, and deferred language nodes remain intentionally unimplemented.
 
 ## Verification
 
-- `pytest`: 268 tests passed.
+- `pytest`: 311 tests passed.
 - `ruff check .`: passed.
-- `mypy src`: passed under strict mode for 23 source files.
+- `mypy src`: passed under strict mode for 25 source files.
 - `kaj --version`: prints `Kaj 0.0.1`.
 - `python -m kaj`: prints `Kaj 0.0.1`.
 
