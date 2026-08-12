@@ -6,7 +6,7 @@ from enum import Enum
 
 from kaj.ast import FunctionDeclaration
 from kaj.runtime.environment import Environment
-from kaj.semantic import FunctionType, RecordType, Symbol
+from kaj.semantic import EnumType, FunctionType, RecordType, Symbol
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,13 @@ class KajRecord:
             if field_name == name:
                 return value
         raise KeyError(name)
+
+
+@dataclass(frozen=True)
+class KajEnumValue:
+    type: EnumType
+    variant: str
+    payload: tuple[RuntimeValue, ...]
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,7 @@ type RuntimeValue = (
     | None
     | KajList
     | KajRecord
+    | KajEnumValue
     | KajFunction
     | BuiltinFunction
 )

@@ -11,7 +11,7 @@ def output(result: PipelineResult) -> str:
 
 def test_numeric_and_string_operators(run_source: Callable[[str], PipelineResult]) -> None:
     result = run_source(
-        'print(10 + 2)\nprint(10 + 2.5)\nprint(5 / 2)\nprint(5 % 2)\n'
+        "print(10 + 2)\nprint(10 + 2.5)\nprint(5 / 2)\nprint(5 % 2)\n"
         'print(2 ** 10)\nprint("a" + "b")'
     )
     assert output(result) == "12\n12.5\n2.5\n1\n1024\nab\n"
@@ -28,9 +28,7 @@ def test_unary_comparison_and_boolean_operators(
 
 
 def test_boolean_operators_short_circuit(run_source: Callable[[str], PipelineResult]) -> None:
-    result = run_source(
-        "print(false and (1 / 0 == 0))\nprint(true or (1 / 0 == 0))"
-    )
+    result = run_source("print(false and (1 / 0 == 0))\nprint(true or (1 / 0 == 0))")
     assert output(result) == "false\ntrue\n"
 
 

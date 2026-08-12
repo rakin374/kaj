@@ -39,8 +39,7 @@ def test_immutable_assignment_is_diagnosed(check_source: Callable[[str], TypeChe
 
 def test_parameter_mutability(check_source: Callable[[str], TypeCheckResult]) -> None:
     result = check_source(
-        "fn immutable(x: Int) -> None { x = 2 }\n"
-        "fn mutable(var x: Int) -> None { x = 2 }"
+        "fn immutable(x: Int) -> None { x = 2 }\nfn mutable(var x: Int) -> None { x = 2 }"
     )
     assert [diagnostic.code for diagnostic in result.diagnostics] == ["ASSIGN_TO_IMMUTABLE"]
 

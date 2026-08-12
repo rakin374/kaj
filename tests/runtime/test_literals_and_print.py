@@ -26,7 +26,7 @@ def test_print_builtin_is_explicitly_resolved(
 
 def test_primitive_print_formatting(run_source: Callable[[str], PipelineResult]) -> None:
     result = run_source(
-        'print(true)\nprint(false)\nprint(123456789012345678901234567890)\n'
+        "print(true)\nprint(false)\nprint(123456789012345678901234567890)\n"
         'print(19.990)\nprint("héllo")\nprint(none)'
     )
 
@@ -52,12 +52,8 @@ def test_print_arity_and_named_arguments_are_checked(
     extra = run_source("print(1, 2)")
 
     assert [item.code for item in missing.types.diagnostics] == ["TYPE_MISSING_ARGUMENT"]
-    assert [item.code for item in named.types.diagnostics] == [
-        "TYPE_UNKNOWN_NAMED_ARGUMENT"
-    ]
-    assert [item.code for item in extra.types.diagnostics] == [
-        "TYPE_TOO_MANY_ARGUMENTS"
-    ]
+    assert [item.code for item in named.types.diagnostics] == ["TYPE_UNKNOWN_NAMED_ARGUMENT"]
+    assert [item.code for item in extra.types.diagnostics] == ["TYPE_TOO_MANY_ARGUMENTS"]
 
 
 def test_module_binding_shadows_print(run_source: Callable[[str], PipelineResult]) -> None:

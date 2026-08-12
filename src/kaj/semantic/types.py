@@ -33,7 +33,12 @@ class RecordType:
     symbol: TypeSymbol
 
 
-type ValueType = PrimitiveType | ListType | RecordType
+@dataclass(frozen=True)
+class EnumType:
+    symbol: TypeSymbol
+
+
+type ValueType = PrimitiveType | ListType | RecordType | EnumType
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,26 @@ class RecordField:
 class RecordDefinition:
     type: RecordType
     fields: tuple[RecordField, ...]
+
+
+@dataclass(frozen=True)
+class EnumPayloadFieldType:
+    name: str
+    type: ValueType
+    declaration_span: SourceSpan
+
+
+@dataclass(frozen=True)
+class EnumVariant:
+    name: str
+    payload: tuple[EnumPayloadFieldType, ...]
+    declaration_span: SourceSpan
+
+
+@dataclass(frozen=True)
+class EnumDefinition:
+    type: EnumType
+    variants: tuple[EnumVariant, ...]
 
 
 @dataclass(frozen=True)
@@ -89,7 +114,7 @@ def format_type(semantic_type: SemanticType) -> str:
         return f"<builtin {semantic_type.value}>"
     if isinstance(semantic_type, ListType):
         return f"List<{format_type(semantic_type.element_type)}>"
-    if isinstance(semantic_type, RecordType):
+    if isinstance(semantic_type, (RecordType, EnumType)):
         return semantic_type.symbol.name
     parameters = ", ".join(format_type(parameter.type) for parameter in semantic_type.parameters)
     return f"({parameters}) -> {format_type(semantic_type.return_type)}"

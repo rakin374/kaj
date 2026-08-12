@@ -19,6 +19,12 @@ from kaj.ast import (
     CallExpression,
     ContinueStatement,
     DecimalLiteral,
+    EnumConstructionExpression,
+    EnumConstructorArgument,
+    EnumDeclaration,
+    EnumPattern,
+    EnumPayloadField,
+    EnumVariantDeclaration,
     Expression,
     ExpressionStatement,
     ForStatement,
@@ -31,10 +37,13 @@ from kaj.ast import (
     ListLiteral,
     MapEntry,
     MapLiteral,
+    MatchCase,
+    MatchStatement,
     MemberAccessExpression,
     NamedType,
     NoneLiteral,
     Parameter,
+    PatternBinding,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
@@ -97,16 +106,17 @@ STATEMENT_STARTS = {
     TokenKind.VAR,
     TokenKind.FN,
     TokenKind.TYPE,
+    TokenKind.ENUM,
     TokenKind.IF,
     TokenKind.WHILE,
     TokenKind.FOR,
     TokenKind.BREAK,
     TokenKind.CONTINUE,
     TokenKind.RETURN,
+    TokenKind.MATCH,
 }
 
 DEFERRED_STATEMENT_KEYWORDS = {
-    TokenKind.ENUM,
     TokenKind.NEWTYPE,
     TokenKind.MATCH,
     TokenKind.IMPORT,
@@ -171,6 +181,8 @@ class Parser:
             return self._parse_function(self._previous())
         if self._match(TokenKind.TYPE):
             return self._parse_record_declaration(self._previous())
+        if self._match(TokenKind.ENUM):
+            return self._parse_enum_declaration(self._previous())
         if self._match(TokenKind.IF):
             return self._parse_if(self._previous())
         if self._match(TokenKind.WHILE):
@@ -185,6 +197,8 @@ class Parser:
             return ContinueStatement(span=token.span)
         if self._match(TokenKind.RETURN):
             return self._parse_return(self._previous())
+        if self._match(TokenKind.MATCH):
+            return self._parse_match(self._previous())
         if self._current().kind in DEFERRED_STATEMENT_KEYWORDS:
             self._raise(
                 PARSE_UNEXPECTED_TOKEN,
@@ -311,6 +325,105 @@ class Parser:
             name=name.lexeme,
             fields=tuple(fields),
         )
+
+    def _parse_enum_declaration(self, start: Token) -> EnumDeclaration:
+        name = self._consume(
+            TokenKind.IDENTIFIER, PARSE_EXPECTED_IDENTIFIER, "Expected an enum type name."
+        )
+        self._consume(
+            TokenKind.LEFT_BRACE, PARSE_EXPECTED_TOKEN, "Expected '{' after enum type name."
+        )
+        variants: list[EnumVariantDeclaration] = []
+        while not self._check(TokenKind.RIGHT_BRACE) and not self._check(TokenKind.EOF):
+            variant = self._consume(
+                TokenKind.IDENTIFIER, PARSE_EXPECTED_IDENTIFIER, "Expected an enum variant name."
+            )
+            payload: list[EnumPayloadField] = []
+            end = variant.span.end
+            if self._match(TokenKind.LEFT_PAREN):
+                if not self._check(TokenKind.RIGHT_PAREN):
+                    while True:
+                        field = self._consume(
+                            TokenKind.IDENTIFIER,
+                            PARSE_EXPECTED_IDENTIFIER,
+                            "Expected a payload field name.",
+                        )
+                        self._consume(
+                            TokenKind.COLON,
+                            PARSE_EXPECTED_TOKEN,
+                            "Expected ':' after payload field name.",
+                        )
+                        annotation = self._parse_type_expression()
+                        payload.append(
+                            EnumPayloadField(
+                                SourceSpan(field.span.start, annotation.span.end),
+                                field.lexeme,
+                                annotation,
+                            )
+                        )
+                        if not self._match(TokenKind.COMMA):
+                            break
+                end = self._consume(
+                    TokenKind.RIGHT_PAREN,
+                    PARSE_EXPECTED_TOKEN,
+                    "Expected ')' after payload fields.",
+                ).span.end
+            variants.append(
+                EnumVariantDeclaration(
+                    SourceSpan(variant.span.start, end), variant.lexeme, tuple(payload)
+                )
+            )
+        close = self._consume(
+            TokenKind.RIGHT_BRACE, PARSE_EXPECTED_TOKEN, "Expected '}' after enum variants."
+        )
+        return EnumDeclaration(
+            SourceSpan(start.span.start, close.span.end), name.lexeme, tuple(variants)
+        )
+
+    def _parse_match(self, start: Token) -> MatchStatement:
+        scrutinee = self._parse_control_condition()
+        self._consume(
+            TokenKind.LEFT_BRACE, PARSE_EXPECTED_TOKEN, "Expected '{' after match expression."
+        )
+        cases: list[MatchCase] = []
+        while not self._check(TokenKind.RIGHT_BRACE) and not self._check(TokenKind.EOF):
+            variant = self._consume(
+                TokenKind.IDENTIFIER, PARSE_EXPECTED_IDENTIFIER, "Expected an enum variant pattern."
+            )
+            bindings: list[PatternBinding] = []
+            pattern_end = variant.span.end
+            if self._match(TokenKind.LEFT_PAREN):
+                if not self._check(TokenKind.RIGHT_PAREN):
+                    while True:
+                        binding = self._consume(
+                            TokenKind.IDENTIFIER,
+                            PARSE_EXPECTED_IDENTIFIER,
+                            "Expected a pattern binding name.",
+                        )
+                        bindings.append(PatternBinding(binding.span, binding.lexeme))
+                        if not self._match(TokenKind.COMMA):
+                            break
+                pattern_end = self._consume(
+                    TokenKind.RIGHT_PAREN,
+                    PARSE_EXPECTED_TOKEN,
+                    "Expected ')' after pattern bindings.",
+                ).span.end
+            pattern = EnumPattern(
+                SourceSpan(variant.span.start, pattern_end), variant.lexeme, tuple(bindings)
+            )
+            self._consume(
+                TokenKind.FAT_ARROW, PARSE_EXPECTED_TOKEN, "Expected '=>' after match pattern."
+            )
+            body = (
+                self._parse_block()
+                if self._check(TokenKind.LEFT_BRACE)
+                else self._parse_statement()
+            )
+            cases.append(MatchCase(SourceSpan(pattern.span.start, body.span.end), pattern, body))
+        close = self._consume(
+            TokenKind.RIGHT_BRACE, PARSE_EXPECTED_TOKEN, "Expected '}' after match cases."
+        )
+        return MatchStatement(SourceSpan(start.span.start, close.span.end), scrutinee, tuple(cases))
 
     def _parse_type_expression(self) -> TypeExpression:
         name = self._consume(
@@ -526,11 +639,19 @@ class Parser:
                     PARSE_EXPECTED_IDENTIFIER,
                     "Expected member name after '.'.",
                 )
-                expression = MemberAccessExpression(
-                    span=SourceSpan(expression.span.start, member.span.end),
-                    object=expression,
-                    member=member.lexeme,
-                )
+                if isinstance(expression, Identifier) and expression.name[:1].isupper():
+                    expression = EnumConstructionExpression(
+                        span=SourceSpan(expression.span.start, member.span.end),
+                        type_name=expression.name,
+                        variant_name=member.lexeme,
+                        arguments=None,
+                    )
+                else:
+                    expression = MemberAccessExpression(
+                        span=SourceSpan(expression.span.start, member.span.end),
+                        object=expression,
+                        member=member.lexeme,
+                    )
             elif self._match(TokenKind.LEFT_BRACKET):
                 index = self._parse_expression()
                 end = self._consume(
@@ -546,7 +667,7 @@ class Parser:
             else:
                 return expression
 
-    def _finish_call(self, callee: Expression) -> CallExpression:
+    def _finish_call(self, callee: Expression) -> Expression:
         arguments: list[CallArgument] = []
         saw_named = False
         if not self._check(TokenKind.RIGHT_PAREN):
@@ -579,6 +700,25 @@ class Parser:
             PARSE_EXPECTED_TOKEN,
             "Expected ')' after call arguments.",
         )
+        if isinstance(callee, EnumConstructionExpression):
+            enum_arguments: list[EnumConstructorArgument] = []
+            for argument in arguments:
+                if argument.name is None:
+                    self._report(
+                        PARSE_EXPECTED_IDENTIFIER,
+                        "Enum constructor arguments must be named.",
+                        argument.span,
+                    )
+                    continue
+                enum_arguments.append(
+                    EnumConstructorArgument(argument.span, argument.name, argument.value)
+                )
+            return EnumConstructionExpression(
+                SourceSpan(callee.span.start, end.span.end),
+                callee.type_name,
+                callee.variant_name,
+                tuple(enum_arguments),
+            )
         return CallExpression(
             span=SourceSpan(callee.span.start, end.span.end),
             callee=callee,

@@ -29,3 +29,21 @@ class RecordFieldDeclaration(Node):
 class RecordDeclaration(Statement):
     name: str
     fields: tuple[RecordFieldDeclaration, ...]
+
+
+@dataclass(frozen=True)
+class EnumPayloadField(Node):
+    name: str
+    type_annotation: TypeExpression
+
+
+@dataclass(frozen=True)
+class EnumVariantDeclaration(Node):
+    name: str
+    payload: tuple[EnumPayloadField, ...]
+
+
+@dataclass(frozen=True)
+class EnumDeclaration(Statement):
+    name: str
+    variants: tuple[EnumVariantDeclaration, ...]

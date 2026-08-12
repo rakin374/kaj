@@ -6,10 +6,7 @@ from kaj.semantic import ResolutionResult, ScopeKind, SymbolKind
 def test_forward_function_reference_recursion_and_mutual_recursion(
     resolve_source: Callable[[str], ResolutionResult],
 ) -> None:
-    result = resolve_source(
-        "fn a() -> None { b() a() }\n"
-        "fn b() -> None { a() }"
-    )
+    result = resolve_source("fn a() -> None { b() a() }\nfn b() -> None { a() }")
 
     assert result.diagnostics == ()
     assert [reference.symbol.name for reference in result.references] == ["b", "a", "a"]

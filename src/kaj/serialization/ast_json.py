@@ -20,6 +20,12 @@ from kaj.ast import (
     CallExpression,
     ContinueStatement,
     DecimalLiteral,
+    EnumConstructionExpression,
+    EnumConstructorArgument,
+    EnumDeclaration,
+    EnumPattern,
+    EnumPayloadField,
+    EnumVariantDeclaration,
     Expression,
     ExpressionStatement,
     ForStatement,
@@ -32,11 +38,14 @@ from kaj.ast import (
     ListLiteral,
     MapEntry,
     MapLiteral,
+    MatchCase,
+    MatchStatement,
     MemberAccessExpression,
     NamedType,
     Node,
     NoneLiteral,
     Parameter,
+    PatternBinding,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
@@ -287,6 +296,24 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
             },
             span,
         )
+    if isinstance(node, EnumConstructorArgument):
+        return _node(
+            "enum_constructor_argument",
+            {"name": node.name, "value": _encode_node(node.value)},
+            span,
+        )
+    if isinstance(node, EnumConstructionExpression):
+        return _node(
+            "enum_construction_expression",
+            {
+                "type_name": node.type_name,
+                "variant_name": node.variant_name,
+                "arguments": None
+                if node.arguments is None
+                else [_encode_node(item) for item in node.arguments],
+            },
+            span,
+        )
     if isinstance(node, NamedType):
         return _node("named_type", {"name": node.name}, span)
     if isinstance(node, GenericType):
@@ -361,6 +388,32 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
             {"value": None if node.value is None else _encode_node(node.value)},
             span,
         )
+    if isinstance(node, PatternBinding):
+        return _node("pattern_binding", {"name": node.name}, span)
+    if isinstance(node, EnumPattern):
+        return _node(
+            "enum_pattern",
+            {
+                "variant_name": node.variant_name,
+                "bindings": [_encode_node(item) for item in node.bindings],
+            },
+            span,
+        )
+    if isinstance(node, MatchCase):
+        return _node(
+            "match_case",
+            {"pattern": _encode_node(node.pattern), "body": _encode_node(node.body)},
+            span,
+        )
+    if isinstance(node, MatchStatement):
+        return _node(
+            "match_statement",
+            {
+                "scrutinee": _encode_node(node.scrutinee),
+                "cases": [_encode_node(item) for item in node.cases],
+            },
+            span,
+        )
     if isinstance(node, Parameter):
         return _node(
             "parameter",
@@ -392,6 +445,24 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
         return _node(
             "record_declaration",
             {"name": node.name, "fields": [_encode_node(field) for field in node.fields]},
+            span,
+        )
+    if isinstance(node, EnumPayloadField):
+        return _node(
+            "enum_payload_field",
+            {"name": node.name, "type_annotation": _encode_node(node.type_annotation)},
+            span,
+        )
+    if isinstance(node, EnumVariantDeclaration):
+        return _node(
+            "enum_variant_declaration",
+            {"name": node.name, "payload": [_encode_node(item) for item in node.payload]},
+            span,
+        )
+    if isinstance(node, EnumDeclaration):
+        return _node(
+            "enum_declaration",
+            {"name": node.name, "variants": [_encode_node(item) for item in node.variants]},
             span,
         )
     raise ASTJSONError(
@@ -594,6 +665,29 @@ def _decode_record_construction(obj: dict[str, object], path: JSONPath) -> Node:
     )
 
 
+def _decode_enum_constructor_argument(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "value"}, path)
+    return EnumConstructorArgument(
+        _span_field(obj, path),
+        _string_field(obj, "name", path),
+        _expression_field(obj, "value", path),
+    )
+
+
+def _decode_enum_construction(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"type_name", "variant_name", "arguments"}, path)
+    raw = _required(obj, "arguments", path)
+    arguments = None
+    if raw is not None:
+        arguments = tuple(_node_list(obj, "arguments", path, _expect_enum_constructor_argument))
+    return EnumConstructionExpression(
+        _span_field(obj, path),
+        _string_field(obj, "type_name", path),
+        _string_field(obj, "variant_name", path),
+        arguments,
+    )
+
+
 def _decode_named_type(obj: dict[str, object], path: JSONPath) -> Node:
     _check_node_fields(obj, {"name"}, path)
     return NamedType(span=_span_field(obj, path), name=_string_field(obj, "name", path))
@@ -718,6 +812,42 @@ def _decode_return(obj: dict[str, object], path: JSONPath) -> Node:
     return ReturnStatement(span=_span_field(obj, path), value=value)
 
 
+def _decode_pattern_binding(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name"}, path)
+    return PatternBinding(_span_field(obj, path), _string_field(obj, "name", path))
+
+
+def _decode_enum_pattern(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"variant_name", "bindings"}, path)
+    return EnumPattern(
+        _span_field(obj, path),
+        _string_field(obj, "variant_name", path),
+        tuple(_node_list(obj, "bindings", path, _expect_pattern_binding)),
+    )
+
+
+def _decode_match_case(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"pattern", "body"}, path)
+    pattern = _decode_node(_required(obj, "pattern", path), path + ("pattern",))
+    if not isinstance(pattern, EnumPattern):
+        raise ASTJSONError(
+            ASTJSON_INVALID_FIELD, "pattern must be an enum_pattern.", path + ("pattern",)
+        )
+    body = _expect_statement(
+        _decode_node(_required(obj, "body", path), path + ("body",)), path + ("body",)
+    )
+    return MatchCase(_span_field(obj, path), pattern, body)
+
+
+def _decode_match_statement(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"scrutinee", "cases"}, path)
+    return MatchStatement(
+        _span_field(obj, path),
+        _expression_field(obj, "scrutinee", path),
+        tuple(_node_list(obj, "cases", path, _expect_match_case)),
+    )
+
+
 def _decode_parameter(obj: dict[str, object], path: JSONPath) -> Node:
     _check_node_fields(obj, {"name", "type_annotation", "mutable"}, path)
     mutable = _required(obj, "mutable", path)
@@ -776,6 +906,33 @@ def _decode_record_declaration(obj: dict[str, object], path: JSONPath) -> Node:
     )
 
 
+def _decode_enum_payload_field(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "type_annotation"}, path)
+    annotation = _expect_type_expression(
+        _decode_node(_required(obj, "type_annotation", path), path + ("type_annotation",)),
+        path + ("type_annotation",),
+    )
+    return EnumPayloadField(_span_field(obj, path), _string_field(obj, "name", path), annotation)
+
+
+def _decode_enum_variant(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "payload"}, path)
+    return EnumVariantDeclaration(
+        _span_field(obj, path),
+        _string_field(obj, "name", path),
+        tuple(_node_list(obj, "payload", path, _expect_enum_payload_field)),
+    )
+
+
+def _decode_enum_declaration(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "variants"}, path)
+    return EnumDeclaration(
+        _span_field(obj, path),
+        _string_field(obj, "name", path),
+        tuple(_node_list(obj, "variants", path, _expect_enum_variant)),
+    )
+
+
 type NodeDecoder = Callable[[dict[str, object], JSONPath], Node]
 _NODE_DECODERS: dict[str, NodeDecoder] = {
     "program": _decode_program,
@@ -796,6 +953,8 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "map_literal": _decode_map,
     "record_field_initializer": _decode_record_field_initializer,
     "record_construction_expression": _decode_record_construction,
+    "enum_constructor_argument": _decode_enum_constructor_argument,
+    "enum_construction_expression": _decode_enum_construction,
     "named_type": _decode_named_type,
     "generic_type": _decode_generic_type,
     "block": _decode_block,
@@ -808,10 +967,17 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "break_statement": _decode_break,
     "continue_statement": _decode_continue,
     "return_statement": _decode_return,
+    "pattern_binding": _decode_pattern_binding,
+    "enum_pattern": _decode_enum_pattern,
+    "match_case": _decode_match_case,
+    "match_statement": _decode_match_statement,
     "parameter": _decode_parameter,
     "function_declaration": _decode_function,
     "record_field_declaration": _decode_record_field_declaration,
     "record_declaration": _decode_record_declaration,
+    "enum_payload_field": _decode_enum_payload_field,
+    "enum_variant_declaration": _decode_enum_variant,
+    "enum_declaration": _decode_enum_declaration,
 }
 
 
@@ -954,22 +1120,48 @@ def _expect_map_entry(node: Node, path: JSONPath) -> MapEntry:
     return node
 
 
-def _expect_record_field_initializer(
-    node: Node, path: JSONPath
-) -> RecordFieldInitializer:
+def _expect_record_field_initializer(node: Node, path: JSONPath) -> RecordFieldInitializer:
     if not isinstance(node, RecordFieldInitializer):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected a record_field_initializer node.", path)
+    return node
+
+
+def _expect_record_field_declaration(node: Node, path: JSONPath) -> RecordFieldDeclaration:
+    if not isinstance(node, RecordFieldDeclaration):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected a record_field_declaration node.", path)
+    return node
+
+
+def _expect_enum_constructor_argument(node: Node, path: JSONPath) -> EnumConstructorArgument:
+    if not isinstance(node, EnumConstructorArgument):
         raise ASTJSONError(
-            ASTJSON_INVALID_FIELD, "Expected a record_field_initializer node.", path
+            ASTJSON_INVALID_FIELD, "Expected an enum_constructor_argument node.", path
         )
     return node
 
 
-def _expect_record_field_declaration(
-    node: Node, path: JSONPath
-) -> RecordFieldDeclaration:
-    if not isinstance(node, RecordFieldDeclaration):
+def _expect_pattern_binding(node: Node, path: JSONPath) -> PatternBinding:
+    if not isinstance(node, PatternBinding):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected a pattern_binding node.", path)
+    return node
+
+
+def _expect_match_case(node: Node, path: JSONPath) -> MatchCase:
+    if not isinstance(node, MatchCase):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected a match_case node.", path)
+    return node
+
+
+def _expect_enum_payload_field(node: Node, path: JSONPath) -> EnumPayloadField:
+    if not isinstance(node, EnumPayloadField):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected an enum_payload_field node.", path)
+    return node
+
+
+def _expect_enum_variant(node: Node, path: JSONPath) -> EnumVariantDeclaration:
+    if not isinstance(node, EnumVariantDeclaration):
         raise ASTJSONError(
-            ASTJSON_INVALID_FIELD, "Expected a record_field_declaration node.", path
+            ASTJSON_INVALID_FIELD, "Expected an enum_variant_declaration node.", path
         )
     return node
 

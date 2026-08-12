@@ -41,15 +41,11 @@ def test_heterogeneous_list_is_rejected(
 
 def test_empty_list_requires_context(check_source: Callable[[str], TypeCheckResult]) -> None:
     result = check_source("let values = []")
-    assert [item.code for item in result.diagnostics] == [
-        "TYPE_CANNOT_INFER_LIST_ELEMENT"
-    ]
+    assert [item.code for item in result.diagnostics] == ["TYPE_CANNOT_INFER_LIST_ELEMENT"]
 
 
 def test_annotated_empty_and_nested_lists(check_source: Callable[[str], TypeCheckResult]) -> None:
-    result = check_source(
-        "let empty: List<Int> = []\nlet nested: List<List<String>> = [[]]"
-    )
+    result = check_source("let empty: List<Int> = []\nlet nested: List<List<String>> = [[]]")
 
     assert binding_type(result, "empty") == ListType(PrimitiveType.INT)
     assert binding_type(result, "nested") == ListType(ListType(PrimitiveType.STRING))
@@ -70,9 +66,7 @@ def test_contextual_element_narrowing_is_rejected(
 
 
 def test_existing_lists_are_invariant(check_source: Callable[[str], TypeCheckResult]) -> None:
-    result = check_source(
-        "let ints: List<Int> = [1, 2]\nlet decimals: List<Decimal> = ints"
-    )
+    result = check_source("let ints: List<Int> = [1, 2]\nlet decimals: List<Decimal> = ints")
     assert [item.code for item in result.diagnostics] == ["TYPE_MISMATCH"]
 
 
@@ -87,7 +81,9 @@ def test_list_annotation_requires_one_argument(
 def test_list_arithmetic_equality_truthiness_and_print_remain_unsupported(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
-    result = check_source("let values = [1]\nlet x = values + values\nlet y = values == values\nif values {}")
+    result = check_source(
+        "let values = [1]\nlet x = values + values\nlet y = values == values\nif values {}"
+    )
     assert [item.code for item in result.diagnostics] == [
         "TYPE_MISMATCH",
         "TYPE_MISMATCH",

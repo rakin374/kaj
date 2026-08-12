@@ -17,8 +17,7 @@ def test_index_out_of_bounds_is_structured(
 
 def test_for_shadowing_and_order(run_source: Callable[[str], PipelineResult]) -> None:
     result = run_source(
-        "let value = 100\nlet values = [1, 2]\n"
-        "for value in values { print(value) }\nprint(value)"
+        "let value = 100\nlet values = [1, 2]\nfor value in values { print(value) }\nprint(value)"
     )
     assert result.execution is not None
     assert result.execution.runtime_error is None

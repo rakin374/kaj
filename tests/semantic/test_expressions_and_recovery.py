@@ -24,8 +24,7 @@ def test_assignment_and_collection_expressions_are_walked(
     resolve_source: Callable[[str], ResolutionResult],
 ) -> None:
     result = resolve_source(
-        "let object = [0]\nlet index = 0\nlet value = 1\n"
-        "object[index] = {index: [value]}"
+        "let object = [0]\nlet index = 0\nlet value = 1\nobject[index] = {index: [value]}"
     )
 
     assert result.diagnostics == ()

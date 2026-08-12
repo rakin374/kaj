@@ -7,9 +7,7 @@ from kaj.semantic import PrimitiveType, TypeCheckResult
 
 
 def test_positional_call_and_result_type(check_source: Callable[[str], TypeCheckResult]) -> None:
-    result = check_source(
-        "fn add(a: Int, b: Int) -> Int { return a + b }\nlet x = add(1, 2)"
-    )
+    result = check_source("fn add(a: Int, b: Int) -> Int { return a + b }\nlet x = add(1, 2)")
     x = result.resolution.module_scope.lookup_local("x")
     assert x is not None
 
@@ -66,9 +64,7 @@ def test_non_callable_value(check_source: Callable[[str], TypeCheckResult]) -> N
 def test_positional_named_and_mixed_calls(
     check_source: Callable[[str], TypeCheckResult], call: str
 ) -> None:
-    result = check_source(
-        "fn send(message: String, priority: Int) -> None {}\n" + call
-    )
+    result = check_source("fn send(message: String, priority: Int) -> None {}\n" + call)
     assert result.diagnostics == ()
 
 
@@ -78,8 +74,7 @@ def test_argument_parameter_mapping_preserves_ast_order(
     from kaj.semantic import Resolver, TypeChecker
 
     program = parse_program(
-        'fn send(message: String, priority: Int) -> None {}\n'
-        'let x = send("hello", priority: 2)'
+        'fn send(message: String, priority: Int) -> None {}\nlet x = send("hello", priority: 2)'
     )
     resolution = Resolver().resolve(program)
     result = TypeChecker(resolution).check(program)

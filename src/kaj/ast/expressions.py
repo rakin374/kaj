@@ -97,3 +97,16 @@ class RecordFieldInitializer(Node):
 class RecordConstructionExpression(Expression):
     type_name: str
     fields: tuple[RecordFieldInitializer, ...]
+
+
+@dataclass(frozen=True)
+class EnumConstructorArgument(Node):
+    name: str
+    value: Expression
+
+
+@dataclass(frozen=True)
+class EnumConstructionExpression(Expression):
+    type_name: str
+    variant_name: str
+    arguments: tuple[EnumConstructorArgument, ...] | None

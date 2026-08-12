@@ -9,8 +9,7 @@ def test_ast_json_round_trip_has_equivalent_function_typing(
     parse_program: Callable[[str], Program],
 ) -> None:
     program = parse_program(
-        "fn add(a: Int, b: Decimal) -> Decimal { return a + b }\n"
-        "let result = add(1, b: 2.5)"
+        "fn add(a: Int, b: Decimal) -> Decimal { return a + b }\nlet result = add(1, b: 2.5)"
     )
     restored = ast_from_json(ast_to_json(program))
 

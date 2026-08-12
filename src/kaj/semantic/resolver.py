@@ -13,6 +13,8 @@ from kaj.ast import (
     CallExpression,
     ContinueStatement,
     DecimalLiteral,
+    EnumConstructionExpression,
+    EnumDeclaration,
     Expression,
     ExpressionStatement,
     ForStatement,
@@ -23,6 +25,7 @@ from kaj.ast import (
     IntegerLiteral,
     ListLiteral,
     MapLiteral,
+    MatchStatement,
     MemberAccessExpression,
     Node,
     NoneLiteral,
@@ -93,9 +96,7 @@ class Resolver:
         self._diagnostics = []
         builtin_scope = Scope(ScopeKind.MODULE) if self._include_builtins else None
         if builtin_scope is not None:
-            print_symbol = self._new_symbol(
-                "print", SymbolKind.BUILTIN_FUNCTION, program.span
-            )
+            print_symbol = self._new_symbol("print", SymbolKind.BUILTIN_FUNCTION, program.span)
             builtin_scope.declare(print_symbol)
         module_scope = Scope(ScopeKind.MODULE, builtin_scope)
 
@@ -208,13 +209,27 @@ class Resolver:
         elif isinstance(statement, ReturnStatement):
             if statement.value is not None:
                 self._resolve_expression(statement.value, scope)
+        elif isinstance(statement, MatchStatement):
+            self._resolve_expression(statement.scrutinee, scope)
+            for case in statement.cases:
+                case_scope = Scope(ScopeKind.BLOCK, scope)
+                for binding in case.pattern.bindings:
+                    self._declare(
+                        case_scope, binding.name, SymbolKind.PATTERN_BINDING, binding.span, binding
+                    )
+                if isinstance(case.body, Block):
+                    self._resolve_statements(case.body.statements, case_scope)
+                else:
+                    self._resolve_statement(case.body, case_scope)
         elif isinstance(statement, Block):
             self._resolve_block(statement, scope)
         elif isinstance(statement, FunctionDeclaration):
             # Named functions are module-level only in Kaj v0. Valid parsed programs
             # reach function declarations through the module traversal above.
             return
-        elif isinstance(statement, (RecordDeclaration, BreakStatement, ContinueStatement)):
+        elif isinstance(
+            statement, (RecordDeclaration, EnumDeclaration, BreakStatement, ContinueStatement)
+        ):
             return
         else:
             raise TypeError(f"Unsupported statement node: {type(statement).__name__}")
@@ -256,6 +271,10 @@ class Resolver:
         elif isinstance(expression, RecordConstructionExpression):
             for field in expression.fields:
                 self._resolve_expression(field.value, scope)
+        elif isinstance(expression, EnumConstructionExpression):
+            if expression.arguments is not None:
+                for enum_argument in expression.arguments:
+                    self._resolve_expression(enum_argument.value, scope)
         elif isinstance(
             expression,
             (

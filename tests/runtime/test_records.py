@@ -29,8 +29,7 @@ def test_independent_and_nested_records(run_source: Callable[[str], PipelineResu
 
 def test_record_field_promotion(run_source: Callable[[str], PipelineResult]) -> None:
     result = run_source(
-        "type Price { amount: Decimal } let price = Price { amount: 5 } "
-        "print(price.amount / 2)"
+        "type Price { amount: Decimal } let price = Price { amount: 5 } print(price.amount / 2)"
     )
     assert output(result) == "2.5\n"
 

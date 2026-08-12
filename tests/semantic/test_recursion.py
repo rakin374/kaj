@@ -22,9 +22,7 @@ def test_mutual_recursion(check_source: Callable[[str], TypeCheckResult]) -> Non
 
 
 def test_forward_function_call(check_source: Callable[[str], TypeCheckResult]) -> None:
-    result = check_source(
-        "fn first() -> Int { return second() }\nfn second() -> Int { return 2 }"
-    )
+    result = check_source("fn first() -> Int { return second() }\nfn second() -> Int { return 2 }")
     assert result.diagnostics == ()
 
 

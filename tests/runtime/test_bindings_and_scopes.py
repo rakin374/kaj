@@ -10,9 +10,7 @@ def output(result: PipelineResult) -> str:
 
 
 def test_let_binding_and_shadowing(run_source: Callable[[str], PipelineResult]) -> None:
-    result = run_source(
-        "let x = 1\nif true { let x = 2 print(x) }\nprint(x)"
-    )
+    result = run_source("let x = 1\nif true { let x = 2 print(x) }\nprint(x)")
     assert output(result) == "2\n1\n"
 
 

@@ -10,9 +10,7 @@ def output(result: PipelineResult) -> str:
 
 
 def test_function_call_and_return(run_source: Callable[[str], PipelineResult]) -> None:
-    result = run_source(
-        "fn add(a: Int, b: Int) -> Int { return a + b }\nprint(add(2, 3))"
-    )
+    result = run_source("fn add(a: Int, b: Int) -> Int { return a + b }\nprint(add(2, 3))")
     assert output(result) == "5\n"
 
 

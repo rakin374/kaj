@@ -9,7 +9,7 @@ def symbol_types(result: TypeCheckResult) -> dict[str, PrimitiveType]:
 
 def test_primitive_literal_inference(check_source: Callable[[str], TypeCheckResult]) -> None:
     result = check_source(
-        'let bool_value = true\nlet int_value = 10\nlet decimal_value = 19.99\n'
+        "let bool_value = true\nlet int_value = 10\nlet decimal_value = 19.99\n"
         'let string_value = "hello"\nlet none_value = none'
     )
 

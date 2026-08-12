@@ -2990,3 +2990,27 @@ array. Each `record_field_initializer` contains `name` and `value`.
 
 All four nodes include ordinary v1 source spans, reject unknown fields, and preserve source order.
 They contain no type-symbol identity, resolved field mapping, semantic type, or runtime value.
+
+---
+
+# 74. Checkpoint 11 Enum and Match Nodes
+
+Checkpoint 11 extends pre-release AST JSON v1 with these syntax-only kinds:
+
+```text
+enum_declaration
+enum_variant_declaration
+enum_payload_field
+enum_construction_expression
+enum_constructor_argument
+match_statement
+match_case
+enum_pattern
+pattern_binding
+```
+
+Enum declarations preserve variant and payload-field source order. An enum construction records
+`type_name`, `variant_name`, and `arguments`; `arguments` is `null` for the unit syntax and an
+ordered array for constructor-call syntax. Match cases contain an enum pattern and one statement
+body, with pattern bindings preserved in source order. All nodes carry standard v1 spans and no
+resolved symbols, semantic types, exhaustiveness metadata, or runtime values.

@@ -17,6 +17,8 @@ from kaj.ast import (
     CallExpression,
     ContinueStatement,
     DecimalLiteral,
+    EnumConstructionExpression,
+    EnumDeclaration,
     Expression,
     ExpressionStatement,
     ForStatement,
@@ -27,6 +29,7 @@ from kaj.ast import (
     IntegerLiteral,
     ListLiteral,
     MapLiteral,
+    MatchStatement,
     MemberAccessExpression,
     NoneLiteral,
     Program,
@@ -42,8 +45,16 @@ from kaj.ast import (
 from kaj.runtime.environment import Environment
 from kaj.runtime.errors import RuntimeErrorInfo, RuntimeFailure
 from kaj.runtime.output import BufferOutput, RuntimeOutput
-from kaj.runtime.values import BuiltinFunction, KajFunction, KajList, KajRecord, RuntimeValue
+from kaj.runtime.values import (
+    BuiltinFunction,
+    KajEnumValue,
+    KajFunction,
+    KajList,
+    KajRecord,
+    RuntimeValue,
+)
 from kaj.semantic import (
+    EnumType,
     FunctionType,
     ListType,
     PrimitiveType,
@@ -91,7 +102,9 @@ class Interpreter:
             self._install_builtins(builtin_environment)
             self._install_functions(program, module_environment)
             for statement in program.statements:
-                if not isinstance(statement, (FunctionDeclaration, RecordDeclaration)):
+                if not isinstance(
+                    statement, (FunctionDeclaration, RecordDeclaration, EnumDeclaration)
+                ):
                     self._execute_statement(statement, module_environment)
         except RuntimeFailure as failure:
             return ExecutionResult(None, self._captured_output(), failure.error)
@@ -194,9 +207,50 @@ class Interpreter:
                 self._evaluate(statement.value, environment),
                 self._expression_type(statement.value),
             )
+        elif isinstance(statement, MatchStatement):
+            value = self._evaluate(statement.scrutinee, environment)
+            if not isinstance(value, KajEnumValue):
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Match scrutinee is not an enum value.",
+                    statement.scrutinee.span,
+                )
+            selected = next(
+                (case for case in statement.cases if case.pattern.variant_name == value.variant),
+                None,
+            )
+            if selected is None:
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    f"No match case for variant '{value.variant}'.",
+                    statement.span,
+                )
+            mapping = self._types.mapping_for_match_case(selected)
+            if mapping is None or mapping.enum_type != value.type:
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "Match case metadata is inconsistent.", selected.span
+                )
+            branch_environment = Environment(environment)
+            if len(selected.pattern.bindings) != len(value.payload):
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Enum payload arity is inconsistent.",
+                    selected.pattern.span,
+                )
+            for binding, payload in zip(selected.pattern.bindings, value.payload, strict=True):
+                symbol = self._resolution.symbol_for_declaration(binding)
+                if symbol is None:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR", "Pattern binding has no symbol.", binding.span
+                    )
+                branch_environment.define(symbol, payload, mutable=False)
+            if isinstance(selected.body, Block):
+                self._execute_block(selected.body, branch_environment)
+            else:
+                self._execute_statement(selected.body, branch_environment)
         elif isinstance(statement, Block):
             self._execute_block(statement, Environment(environment))
-        elif isinstance(statement, (FunctionDeclaration, RecordDeclaration)):
+        elif isinstance(statement, (FunctionDeclaration, RecordDeclaration, EnumDeclaration)):
             return
         elif isinstance(statement, (BreakStatement, ContinueStatement)):
             self._fail(
@@ -215,9 +269,7 @@ class Interpreter:
         for statement in block.statements:
             self._execute_statement(statement, environment)
 
-    def _execute_assignment(
-        self, statement: AssignmentStatement, environment: Environment
-    ) -> None:
+    def _execute_assignment(self, statement: AssignmentStatement, environment: Environment) -> None:
         if not isinstance(statement.target, Identifier):
             self._fail(
                 "RUNTIME_INVALID_OPERATION",
@@ -248,9 +300,7 @@ class Interpreter:
                 statement.span,
             )
             value_type = self._binary_result_type(operator, target_type, rhs_type)
-        value = self._coerce(
-            value, value_type, self._symbol_type(symbol), statement.value.span
-        )
+        value = self._coerce(value, value_type, self._symbol_type(symbol), statement.value.span)
         try:
             environment.assign(symbol, value)
         except PermissionError:
@@ -314,10 +364,56 @@ class Interpreter:
                 )
                 fields.append((field.name, value))
             return KajRecord(record_type, tuple(fields))
+        if isinstance(expression, EnumConstructionExpression):
+            enum_type = self._expression_type(expression)
+            if not isinstance(enum_type, EnumType):
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Enum construction has no static enum type.",
+                    expression.span,
+                )
+            values_by_name: dict[str, RuntimeValue] = {}
+            for argument in () if expression.arguments is None else expression.arguments:
+                enum_field = self._types.field_for_enum_argument(argument)
+                if enum_field is None:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR",
+                        "Enum argument has no field mapping.",
+                        argument.span,
+                    )
+                values_by_name[enum_field.name] = self._coerce(
+                    self._evaluate(argument.value, environment),
+                    self._expression_type(argument.value),
+                    enum_field.type,
+                    argument.span,
+                )
+            definition = self._types.enum_definition(enum_type)
+            if definition is None:
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Enum construction has no definition.",
+                    expression.span,
+                )
+            variant = next(
+                (item for item in definition.variants if item.name == expression.variant_name), None
+            )
+            if variant is None:
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Enum construction has no variant definition.",
+                    expression.span,
+                )
+            return KajEnumValue(
+                enum_type,
+                expression.variant_name,
+                tuple(values_by_name[field.name] for field in variant.payload),
+            )
         if isinstance(expression, ListLiteral):
             list_type = self._expression_type(expression)
             if not isinstance(list_type, ListType):
-                self._fail("RUNTIME_INTERNAL_ERROR", "List has no static List type.", expression.span)
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "List has no static List type.", expression.span
+                )
             elements = tuple(
                 self._coerce(
                     self._evaluate(element, environment),
@@ -483,9 +579,7 @@ class Interpreter:
             )
         self._fail("RUNTIME_INVALID_OPERATION", "Unknown binary operator.", span)
 
-    def _evaluate_call(
-        self, expression: CallExpression, environment: Environment
-    ) -> RuntimeValue:
+    def _evaluate_call(self, expression: CallExpression, environment: Environment) -> RuntimeValue:
         callee = self._evaluate(expression.callee, environment)
         values = [self._evaluate(argument.value, environment) for argument in expression.arguments]
         if callee is BuiltinFunction.PRINT:
@@ -502,7 +596,9 @@ class Interpreter:
             mapping = self._types.mapping_for_argument(argument)
             if mapping is None:
                 self._fail(
-                    "RUNTIME_INTERNAL_ERROR", "Call argument has no parameter mapping.", argument.span
+                    "RUNTIME_INTERNAL_ERROR",
+                    "Call argument has no parameter mapping.",
+                    argument.span,
                 )
             parameter = callee.declaration.parameters[mapping.parameter_index]
             symbol = self._resolution.symbol_for_declaration(parameter)
@@ -555,7 +651,9 @@ class Interpreter:
     def _symbol_type(self, symbol: Symbol) -> SemanticType:
         semantic_type = self._types.type_of_symbol(symbol)
         if semantic_type is None:
-            self._fail("RUNTIME_INTERNAL_ERROR", "Symbol has no static type.", symbol.declaration_span)
+            self._fail(
+                "RUNTIME_INTERNAL_ERROR", "Symbol has no static type.", symbol.declaration_span
+            )
         return semantic_type
 
     def _binary_result_type(

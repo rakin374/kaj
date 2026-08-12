@@ -7,7 +7,7 @@ def test_record_definition_and_construction(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
     result = check_source(
-        'type User { name: String age: Int tags: List<String> }\n'
+        "type User { name: String age: Int tags: List<String> }\n"
         'let user = User { tags: ["admin"], age: 30, name: "Alice" }'
     )
     user = result.resolution.module_scope.lookup_local("user")
@@ -26,8 +26,7 @@ def test_forward_and_recursive_record_types(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
     result = check_source(
-        "type User { address: Address }\n"
-        "type Address { owner: User city: String }"
+        "type User { address: Address }\ntype Address { owner: User city: String }"
     )
     assert result.diagnostics == ()
     assert len(result.records) == 2
@@ -36,10 +35,7 @@ def test_forward_and_recursive_record_types(
 def test_duplicate_type_and_declared_fields(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
-    result = check_source(
-        "type User { name: String name: String }\n"
-        "type User { age: Int }"
-    )
+    result = check_source("type User { name: String name: String }\ntype User { age: Int }")
     assert [item.code for item in result.diagnostics] == [
         "TYPE_DUPLICATE_TYPE_NAME",
         "TYPE_DUPLICATE_FIELD",
@@ -53,8 +49,7 @@ def test_unknown_field_type(check_source: Callable[[str], TypeCheckResult]) -> N
 
 def test_constructor_shape_diagnostics(check_source: Callable[[str], TypeCheckResult]) -> None:
     result = check_source(
-        "type User { name: String age: Int }\n"
-        'User { name: "A", name: "B", extra: true }'
+        'type User { name: String age: Int }\nUser { name: "A", name: "B", extra: true }'
     )
     assert [item.code for item in result.diagnostics] == [
         "TYPE_DUPLICATE_FIELD",
@@ -66,9 +61,7 @@ def test_constructor_shape_diagnostics(check_source: Callable[[str], TypeCheckRe
 def test_constructor_unknown_type_and_wrong_field_type(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
-    result = check_source(
-        'type User { age: Int }\nUser { age: 1.5 }\nMissing { value: "x" }'
-    )
+    result = check_source('type User { age: Int }\nUser { age: 1.5 }\nMissing { value: "x" }')
     assert [item.code for item in result.diagnostics] == [
         "TYPE_MISMATCH",
         "TYPE_UNKNOWN_TYPE",
@@ -130,6 +123,4 @@ def test_field_assignment_is_rejected(check_source: Callable[[str], TypeCheckRes
     result = check_source(
         'type User { name: String } var user = User { name: "A" } user.name = "B"'
     )
-    assert [item.code for item in result.diagnostics] == [
-        "TYPE_FIELD_ASSIGNMENT_NOT_SUPPORTED"
-    ]
+    assert [item.code for item in result.diagnostics] == ["TYPE_FIELD_ASSIGNMENT_NOT_SUPPORTED"]

@@ -53,7 +53,8 @@
         { "$ref": "#/$defs/indexExpression" },
         { "$ref": "#/$defs/listLiteral" },
         { "$ref": "#/$defs/mapLiteral" },
-        { "$ref": "#/$defs/recordConstructionExpression" }
+        { "$ref": "#/$defs/recordConstructionExpression" },
+        { "$ref": "#/$defs/enumConstructionExpression" }
       ]
     },
     "typeExpression": {
@@ -75,7 +76,9 @@
         { "$ref": "#/$defs/continueStatement" },
         { "$ref": "#/$defs/returnStatement" },
         { "$ref": "#/$defs/functionDeclaration" },
-        { "$ref": "#/$defs/recordDeclaration" }
+        { "$ref": "#/$defs/recordDeclaration" },
+        { "$ref": "#/$defs/enumDeclaration" },
+        { "$ref": "#/$defs/matchStatement" }
       ]
     },
     "program": {
@@ -584,6 +587,66 @@
         }
       ],
       "unevaluatedProperties": false
+    },
+    "enumConstructorArgument": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["name", "value"], "properties": {
+          "kind": { "const": "enum_constructor_argument" }, "name": { "type": "string" }, "value": { "$ref": "#/$defs/expression" }
+        } }
+      ], "unevaluatedProperties": false
+    },
+    "enumConstructionExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["type_name", "variant_name", "arguments"], "properties": {
+          "kind": { "const": "enum_construction_expression" }, "type_name": { "type": "string" }, "variant_name": { "type": "string" },
+          "arguments": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "$ref": "#/$defs/enumConstructorArgument" } }] }
+        } }
+      ], "unevaluatedProperties": false
+    },
+    "enumPayloadField": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["name", "type_annotation"], "properties": {
+          "kind": { "const": "enum_payload_field" }, "name": { "type": "string" }, "type_annotation": { "$ref": "#/$defs/typeExpression" }
+        } }
+      ], "unevaluatedProperties": false
+    },
+    "enumVariantDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["name", "payload"], "properties": {
+          "kind": { "const": "enum_variant_declaration" }, "name": { "type": "string" }, "payload": { "type": "array", "items": { "$ref": "#/$defs/enumPayloadField" } }
+        } }
+      ], "unevaluatedProperties": false
+    },
+    "enumDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["name", "variants"], "properties": {
+          "kind": { "const": "enum_declaration" }, "name": { "type": "string" }, "variants": { "type": "array", "items": { "$ref": "#/$defs/enumVariantDeclaration" } }
+        } }
+      ], "unevaluatedProperties": false
+    },
+    "patternBinding": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }, { "type": "object", "required": ["name"], "properties": { "kind": { "const": "pattern_binding" }, "name": { "type": "string" } } }],
+      "unevaluatedProperties": false
+    },
+    "enumPattern": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }, { "type": "object", "required": ["variant_name", "bindings"], "properties": {
+        "kind": { "const": "enum_pattern" }, "variant_name": { "type": "string" }, "bindings": { "type": "array", "items": { "$ref": "#/$defs/patternBinding" } }
+      } }], "unevaluatedProperties": false
+    },
+    "matchCase": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }, { "type": "object", "required": ["pattern", "body"], "properties": {
+        "kind": { "const": "match_case" }, "pattern": { "$ref": "#/$defs/enumPattern" }, "body": { "$ref": "#/$defs/statement" }
+      } }], "unevaluatedProperties": false
+    },
+    "matchStatement": {
+      "allOf": [{ "$ref": "#/$defs/nodeBase" }, { "type": "object", "required": ["scrutinee", "cases"], "properties": {
+        "kind": { "const": "match_statement" }, "scrutinee": { "$ref": "#/$defs/expression" }, "cases": { "type": "array", "items": { "$ref": "#/$defs/matchCase" } }
+      } }], "unevaluatedProperties": false
     }
   }
 }

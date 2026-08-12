@@ -45,8 +45,7 @@ def test_list_function_annotations_and_contextual_call(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
     result = check_source(
-        "fn first(values: List<Decimal>) -> Decimal { return values[0] }\n"
-        "let x = first([1, 2])"
+        "fn first(values: List<Decimal>) -> Decimal { return values[0] }\nlet x = first([1, 2])"
     )
     x = result.resolution.module_scope.lookup_local("x")
     assert x is not None
@@ -56,9 +55,7 @@ def test_list_function_annotations_and_contextual_call(
 
 
 def test_wrong_list_call_argument(check_source: Callable[[str], TypeCheckResult]) -> None:
-    result = check_source(
-        "fn first(values: List<Int>) -> Int { return values[0] }\nfirst([\"x\"])"
-    )
+    result = check_source('fn first(values: List<Int>) -> Int { return values[0] }\nfirst(["x"])')
     assert [item.code for item in result.diagnostics] == ["TYPE_MISMATCH"]
 
 

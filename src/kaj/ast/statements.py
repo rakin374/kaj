@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kaj.ast.base import AssignmentOperator, BindingKind, Expression, Statement, TypeExpression
+from kaj.ast.base import (
+    AssignmentOperator,
+    BindingKind,
+    Expression,
+    Node,
+    Statement,
+    TypeExpression,
+)
 
 
 @dataclass(frozen=True)
@@ -63,3 +70,26 @@ class ContinueStatement(Statement):
 @dataclass(frozen=True)
 class ReturnStatement(Statement):
     value: Expression | None
+
+
+@dataclass(frozen=True)
+class PatternBinding(Node):
+    name: str
+
+
+@dataclass(frozen=True)
+class EnumPattern(Node):
+    variant_name: str
+    bindings: tuple[PatternBinding, ...]
+
+
+@dataclass(frozen=True)
+class MatchCase(Node):
+    pattern: EnumPattern
+    body: Statement
+
+
+@dataclass(frozen=True)
+class MatchStatement(Statement):
+    scrutinee: Expression
+    cases: tuple[MatchCase, ...]

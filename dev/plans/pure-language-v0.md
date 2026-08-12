@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 10 — Records
+**Current checkpoint:** Checkpoint 11 — Enums and Match
 **Status:** Complete
 
 ## Completed
@@ -76,6 +76,13 @@
   deterministic 34-digit local context, short-circuit Boolean operators, and no float leakage.
 - Runtime bindings, identifier assignment, compound assignment, `if`, `while`, function calls,
   recursion, return unwinding, and materialized `Int` to `Decimal` boundary conversions.
+- Nominal enum declarations with unit and named-payload variants, shared record/enum type-name
+  predeclaration, forward type references, and deterministic declaration diagnostics.
+- Explicit enum construction and match AST/JSON nodes, strict schema coverage, case-local pattern
+  symbols, variant/arity checking, duplicate-case detection, and exhaustive-match diagnostics.
+- Controlled `KajEnumValue` execution with source-order constructor evaluation, declaration-order
+  payload storage, single scrutinee evaluation, isolated selected-case execution, payload binding,
+  and return propagation through exhaustive matches.
 - An explicit host builtin scope containing only narrowly typed `print`, with deterministic
   primitive formatting and an injectable output sink.
 - Structured runtime failures for division by zero, invalid operations, and internal-state errors,

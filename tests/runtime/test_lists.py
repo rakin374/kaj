@@ -18,9 +18,7 @@ def test_list_acceptance_program(run_source: Callable[[str], PipelineResult]) ->
 
 
 def test_index_count_and_nested_lists(run_source: Callable[[str], PipelineResult]) -> None:
-    result = run_source(
-        "let rows = [[1, 2], [3, 4]]\nprint(rows[1][0])\nprint(rows.count)"
-    )
+    result = run_source("let rows = [[1, 2], [3, 4]]\nprint(rows[1][0])\nprint(rows.count)")
     assert output(result) == "3\n2\n"
 
 

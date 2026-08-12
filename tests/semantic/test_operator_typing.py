@@ -39,7 +39,7 @@ def test_arithmetic_tables(
     assert result.diagnostics == ()
 
 
-@pytest.mark.parametrize("expression", ['"10" + 2', "10 == \"10\"", '"a" < "b"'])
+@pytest.mark.parametrize("expression", ['"10" + 2', '10 == "10"', '"a" < "b"'])
 def test_incompatible_binary_operands_are_type_mismatches(
     check_source: Callable[[str], TypeCheckResult], expression: str
 ) -> None:
@@ -78,6 +78,4 @@ def test_invalid_unary_operators(
 ) -> None:
     result = check_source(f"let x = {expression}")
 
-    assert [diagnostic.code for diagnostic in result.diagnostics] == [
-        "TYPE_INVALID_OPERATOR"
-    ]
+    assert [diagnostic.code for diagnostic in result.diagnostics] == ["TYPE_INVALID_OPERATOR"]

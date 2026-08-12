@@ -14,7 +14,7 @@ def function_type(result: TypeCheckResult, name: str) -> FunctionType:
 def test_signature_preserves_parameter_contract(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
-    result = check_source("fn add(a: Int, var b: Decimal) -> String { return \"ok\" }")
+    result = check_source('fn add(a: Int, var b: Decimal) -> String { return "ok" }')
     signature = function_type(result, "add")
 
     assert [(item.name, item.type, item.mutable) for item in signature.parameters] == [
@@ -40,9 +40,7 @@ def test_parameter_symbol_types_are_available_in_body(
     check_source: Callable[[str], TypeCheckResult],
 ) -> None:
     result = check_source("fn add(a: Int, b: Decimal) -> Decimal { return a + b }")
-    parameter_types = [
-        typed.type for typed in result.symbols if typed.symbol.name in {"a", "b"}
-    ]
+    parameter_types = [typed.type for typed in result.symbols if typed.symbol.name in {"a", "b"}]
 
     assert parameter_types == [PrimitiveType.INT, PrimitiveType.DECIMAL]
     assert result.diagnostics == ()

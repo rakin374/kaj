@@ -37,11 +37,7 @@ def test_else_if_condition_uses_surrounding_scope(
 def test_for_order_scope_and_duplicate_recovery(
     resolve_source: Callable[[str], ResolutionResult],
 ) -> None:
-    result = resolve_source(
-        "let item = [1]\n"
-        "for item in item { item let item = 2 item }\n"
-        "item"
-    )
+    result = resolve_source("let item = [1]\nfor item in item { item let item = 2 item }\nitem")
 
     iterable, body_before, body_after, after_loop = (
         reference.symbol for reference in result.references

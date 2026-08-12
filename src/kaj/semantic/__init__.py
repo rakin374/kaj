@@ -3,6 +3,8 @@ from kaj.semantic.scope import Scope, ScopeKind
 from kaj.semantic.symbols import Symbol, SymbolKind
 from kaj.semantic.type_checker import (
     MappedArgument,
+    MappedEnumArgument,
+    MappedMatchCase,
     MappedRecordField,
     TypeChecker,
     TypeCheckResult,
@@ -11,6 +13,10 @@ from kaj.semantic.type_checker import (
 )
 from kaj.semantic.types import (
     BuiltinFunctionType,
+    EnumDefinition,
+    EnumPayloadFieldType,
+    EnumType,
+    EnumVariant,
     FunctionParameterType,
     FunctionType,
     ListType,
@@ -27,10 +33,16 @@ from kaj.semantic.types import (
 __all__ = [
     "BuiltinFunctionType",
     "DeclaredSymbol",
+    "EnumDefinition",
+    "EnumPayloadFieldType",
+    "EnumType",
+    "EnumVariant",
     "FunctionParameterType",
     "FunctionType",
     "ListType",
     "MappedArgument",
+    "MappedEnumArgument",
+    "MappedMatchCase",
     "MappedRecordField",
     "PrimitiveType",
     "RecordDefinition",
