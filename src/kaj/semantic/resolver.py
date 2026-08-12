@@ -253,7 +253,11 @@ class Resolver:
             self._resolve_expression(expression.left, scope)
             self._resolve_expression(expression.right, scope)
         elif isinstance(expression, CallExpression):
-            self._resolve_expression(expression.callee, scope)
+            if not (
+                isinstance(expression.callee, Identifier)
+                and expression.callee.name in {"some", "ok", "err"}
+            ):
+                self._resolve_expression(expression.callee, scope)
             for argument in expression.arguments:
                 self._resolve_expression(argument.value, scope)
         elif isinstance(expression, MemberAccessExpression):

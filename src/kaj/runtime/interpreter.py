@@ -57,9 +57,11 @@ from kaj.semantic import (
     EnumType,
     FunctionType,
     ListType,
+    OptionalType,
     PrimitiveType,
     RecordType,
     ResolutionResult,
+    ResultType,
     SemanticType,
     Symbol,
     SymbolKind,
@@ -320,6 +322,9 @@ class Interpreter:
         if isinstance(expression, StringLiteral):
             return expression.value
         if isinstance(expression, NoneLiteral):
+            semantic_type = self._expression_type(expression)
+            if isinstance(semantic_type, OptionalType):
+                return KajEnumValue(semantic_type, "none", ())
             return None
         if isinstance(expression, Identifier):
             symbol = self._resolution.symbol_for(expression)
@@ -580,6 +585,14 @@ class Interpreter:
         self._fail("RUNTIME_INVALID_OPERATION", "Unknown binary operator.", span)
 
     def _evaluate_call(self, expression: CallExpression, environment: Environment) -> RuntimeValue:
+        if isinstance(expression.callee, Identifier) and expression.callee.name in {
+            "some",
+            "ok",
+            "err",
+        }:
+            return self._evaluate_standard_constructor(
+                expression, expression.callee.name, environment
+            )
         callee = self._evaluate(expression.callee, environment)
         values = [self._evaluate(argument.value, environment) for argument in expression.arguments]
         if callee is BuiltinFunction.PRINT:
@@ -623,6 +636,37 @@ class Interpreter:
                 callee.declaration.span,
             )
         return None
+
+    def _evaluate_standard_constructor(
+        self, expression: CallExpression, name: str, environment: Environment
+    ) -> RuntimeValue:
+        if len(expression.arguments) != 1:
+            self._fail(
+                "RUNTIME_INTERNAL_ERROR",
+                f"Standard constructor '{name}' has invalid arity.",
+                expression.span,
+            )
+        tagged_type = self._expression_type(expression)
+        if name == "some" and isinstance(tagged_type, OptionalType):
+            payload_type = tagged_type.value_type
+            variant = "some"
+        elif name in {"ok", "err"} and isinstance(tagged_type, ResultType):
+            payload_type = tagged_type.ok_type if name == "ok" else tagged_type.err_type
+            variant = name
+        else:
+            self._fail(
+                "RUNTIME_INTERNAL_ERROR",
+                f"Standard constructor '{name}' has invalid static type.",
+                expression.span,
+            )
+        argument = expression.arguments[0]
+        value = self._coerce(
+            self._evaluate(argument.value, environment),
+            self._expression_type(argument.value),
+            payload_type,
+            argument.span,
+        )
+        return KajEnumValue(tagged_type, variant, (value,))
 
     def _coerce(
         self,

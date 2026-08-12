@@ -9,7 +9,7 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 11 — Enums and Match
+**Current checkpoint:** Checkpoint 12 — Optional and Result
 **Status:** Complete
 
 ## Completed
@@ -83,6 +83,10 @@
 - Controlled `KajEnumValue` execution with source-order constructor evaluation, declaration-order
   payload storage, single scrutinee evaluation, isolated selected-case execution, payload binding,
   and return propagation through exhaustive matches.
+- Invariant language-standard `Optional<T>` and `Result<T, E>` semantic types with recursive type
+  arguments, contextual `some`/`none`/`ok`/`err` typing, and primitive `None` preservation.
+- Optional/Result matching through the shared tagged-value exhaustiveness, pattern-scope,
+  definite-return, and interpreter machinery, with explicit runtime type/tag identity.
 - An explicit host builtin scope containing only narrowly typed `print`, with deterministic
   primitive formatting and an injectable output sink.
 - Structured runtime failures for division by zero, invalid operations, and internal-state errors,

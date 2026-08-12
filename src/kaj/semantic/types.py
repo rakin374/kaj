@@ -38,7 +38,18 @@ class EnumType:
     symbol: TypeSymbol
 
 
-type ValueType = PrimitiveType | ListType | RecordType | EnumType
+@dataclass(frozen=True)
+class OptionalType:
+    value_type: ValueType
+
+
+@dataclass(frozen=True)
+class ResultType:
+    ok_type: ValueType
+    err_type: ValueType
+
+
+type ValueType = PrimitiveType | ListType | RecordType | EnumType | OptionalType | ResultType
 
 
 @dataclass(frozen=True)
@@ -114,6 +125,12 @@ def format_type(semantic_type: SemanticType) -> str:
         return f"<builtin {semantic_type.value}>"
     if isinstance(semantic_type, ListType):
         return f"List<{format_type(semantic_type.element_type)}>"
+    if isinstance(semantic_type, OptionalType):
+        return f"Optional<{format_type(semantic_type.value_type)}>"
+    if isinstance(semantic_type, ResultType):
+        return (
+            f"Result<{format_type(semantic_type.ok_type)}, {format_type(semantic_type.err_type)}>"
+        )
     if isinstance(semantic_type, (RecordType, EnumType)):
         return semantic_type.symbol.name
     parameters = ", ".join(format_type(parameter.type) for parameter in semantic_type.parameters)

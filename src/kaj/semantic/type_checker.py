@@ -60,10 +60,12 @@ from kaj.semantic.types import (
     FunctionParameterType,
     FunctionType,
     ListType,
+    OptionalType,
     PrimitiveType,
     RecordDefinition,
     RecordField,
     RecordType,
+    ResultType,
     SemanticType,
     TypeSymbol,
     ValueType,
@@ -107,7 +109,7 @@ class MappedEnumArgument:
 @dataclass(frozen=True)
 class MappedMatchCase:
     case: MatchCase
-    enum_type: EnumType
+    enum_type: EnumType | OptionalType | ResultType
     variant: EnumVariant
 
 
@@ -358,10 +360,10 @@ class TypeChecker:
             primitive = PRIMITIVE_TYPES_BY_NAME.get(annotation.name)
             if primitive is not None:
                 return primitive
-            if annotation.name == "List":
+            if annotation.name in {"List", "Optional", "Result"}:
                 self._diagnose(
                     "TYPE_INVALID_TYPE_ARGUMENTS",
-                    "List requires exactly one type argument.",
+                    f"{annotation.name} requires generic type arguments.",
                     annotation.span,
                 )
                 return PrimitiveType.ERROR
@@ -382,6 +384,27 @@ class TypeChecker:
                     return PrimitiveType.ERROR
                 element_type = self._resolve_annotation(annotation.arguments[0])
                 return ListType(element_type)
+            if annotation.base.name == "Optional":
+                if len(annotation.arguments) != 1:
+                    self._diagnose(
+                        "TYPE_INVALID_TYPE_ARGUMENTS",
+                        "Optional requires exactly one type argument.",
+                        annotation.span,
+                    )
+                    return PrimitiveType.ERROR
+                return OptionalType(self._resolve_annotation(annotation.arguments[0]))
+            if annotation.base.name == "Result":
+                if len(annotation.arguments) != 2:
+                    self._diagnose(
+                        "TYPE_INVALID_TYPE_ARGUMENTS",
+                        "Result requires exactly two type arguments.",
+                        annotation.span,
+                    )
+                    return PrimitiveType.ERROR
+                return ResultType(
+                    self._resolve_annotation(annotation.arguments[0]),
+                    self._resolve_annotation(annotation.arguments[1]),
+                )
         else:
             raise TypeError(f"Unsupported type expression: {type(annotation).__name__}")
         self._diagnose(
@@ -564,7 +587,7 @@ class TypeChecker:
         elif isinstance(expression, StringLiteral):
             result = PrimitiveType.STRING
         elif isinstance(expression, NoneLiteral):
-            result = PrimitiveType.NONE
+            result = expected if isinstance(expected, OptionalType) else PrimitiveType.NONE
         elif isinstance(expression, Identifier):
             result = self._symbol_type(self._resolution.symbol_for(expression))
         elif isinstance(expression, UnaryExpression):
@@ -574,7 +597,7 @@ class TypeChecker:
             right = self._infer(expression.right)
             result = self._infer_binary_types(expression.operator, left, right, expression.span)
         elif isinstance(expression, CallExpression):
-            result = self._infer_call(expression)
+            result = self._infer_call(expression, expected)
         elif isinstance(expression, RecordConstructionExpression):
             result = self._infer_record_construction(expression)
         elif isinstance(expression, EnumConstructionExpression):
@@ -667,7 +690,9 @@ class TypeChecker:
                 expression.span,
             )
             return PrimitiveType.ERROR
-        if isinstance(common, (PrimitiveType, ListType, RecordType, EnumType)):
+        if isinstance(
+            common, (PrimitiveType, ListType, RecordType, EnumType, OptionalType, ResultType)
+        ):
             return ListType(common)
         self._diagnose(
             "TYPE_MISMATCH",
@@ -766,7 +791,7 @@ class TypeChecker:
 
     def _check_match(self, statement: MatchStatement) -> None:
         scrutinee_type = self._infer(statement.scrutinee)
-        if not isinstance(scrutinee_type, EnumType):
+        if not isinstance(scrutinee_type, (EnumType, OptionalType, ResultType)):
             self._diagnose(
                 "TYPE_MATCH_REQUIRES_ENUM",
                 "Match scrutinee must have an enum type.",
@@ -775,17 +800,17 @@ class TypeChecker:
             for case in statement.cases:
                 self._check_statement(case.body)
             return
-        definition = self._enum_definition(scrutinee_type)
+        variants = self._tagged_variants(scrutinee_type, statement.span)
         covered: set[str] = set()
         for case in statement.cases:
             variant = next(
-                (item for item in definition.variants if item.name == case.pattern.variant_name),
+                (item for item in variants if item.name == case.pattern.variant_name),
                 None,
             )
             if variant is None:
                 self._diagnose(
                     "TYPE_UNKNOWN_VARIANT",
-                    f"Enum '{scrutinee_type.symbol.name}' has no variant '{case.pattern.variant_name}'.",
+                    f"Tagged type '{format_type(scrutinee_type)}' has no variant '{case.pattern.variant_name}'.",
                     case.pattern.span,
                 )
             else:
@@ -810,7 +835,7 @@ class TypeChecker:
                         self._record_symbol(symbol, field.type)
                         self._mutable_symbols[symbol.id] = False
             self._check_statement(case.body)
-        missing = [variant.name for variant in definition.variants if variant.name not in covered]
+        missing = [variant.name for variant in variants if variant.name not in covered]
         if missing:
             self._diagnose(
                 "NON_EXHAUSTIVE_MATCH",
@@ -819,6 +844,23 @@ class TypeChecker:
             )
         else:
             self._exhaustive_matches.add(id(statement))
+
+    def _tagged_variants(
+        self, tagged_type: EnumType | OptionalType | ResultType, span: SourceSpan
+    ) -> tuple[EnumVariant, ...]:
+        if isinstance(tagged_type, EnumType):
+            return self._enum_definition(tagged_type).variants
+        if isinstance(tagged_type, OptionalType):
+            return (
+                EnumVariant(
+                    "some", (EnumPayloadFieldType("value", tagged_type.value_type, span),), span
+                ),
+                EnumVariant("none", (), span),
+            )
+        return (
+            EnumVariant("ok", (EnumPayloadFieldType("value", tagged_type.ok_type, span),), span),
+            EnumVariant("err", (EnumPayloadFieldType("error", tagged_type.err_type, span),), span),
+        )
 
     def _infer_record_construction(self, expression: RecordConstructionExpression) -> SemanticType:
         record_type = self._record_types_by_name.get(expression.type_name)
@@ -936,7 +978,15 @@ class TypeChecker:
         )
         return PrimitiveType.ERROR
 
-    def _infer_call(self, expression: CallExpression) -> SemanticType:
+    def _infer_call(
+        self, expression: CallExpression, expected: SemanticType | None = None
+    ) -> SemanticType:
+        if isinstance(expression.callee, Identifier) and expression.callee.name in {
+            "some",
+            "ok",
+            "err",
+        }:
+            return self._infer_standard_constructor(expression, expression.callee.name, expected)
         callee_type = self._infer(expression.callee)
         if callee_type is PrimitiveType.ERROR:
             for argument in expression.arguments:
@@ -1018,6 +1068,69 @@ class TypeChecker:
                 expression.span,
             )
         return callee_type.return_type
+
+    def _infer_standard_constructor(
+        self, expression: CallExpression, name: str, expected: SemanticType | None
+    ) -> SemanticType:
+        if len(expression.arguments) != 1:
+            for argument in expression.arguments:
+                self._infer(argument.value)
+            self._diagnose(
+                "TYPE_MISMATCH",
+                f"Standard constructor '{name}' requires exactly one argument.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        argument = expression.arguments[0]
+        if argument.name is not None:
+            self._diagnose(
+                "TYPE_UNKNOWN_NAMED_ARGUMENT",
+                f"Standard constructor '{name}' does not accept named arguments.",
+                argument.span,
+            )
+        if expected is PrimitiveType.ERROR:
+            self._infer(argument.value)
+            return PrimitiveType.ERROR
+        if name == "some":
+            optional_expected = expected if isinstance(expected, OptionalType) else None
+            target = optional_expected.value_type if optional_expected is not None else None
+            payload_type = self._infer(argument.value, target)
+            if optional_expected is not None and not is_assignable(
+                payload_type, optional_expected.value_type
+            ):
+                self._diagnose(
+                    "TYPE_MISMATCH",
+                    f"Cannot construct {format_type(optional_expected)} from {format_type(payload_type)}.",
+                    argument.value.span,
+                )
+            if optional_expected is not None:
+                return optional_expected
+            if isinstance(
+                payload_type,
+                (PrimitiveType, ListType, RecordType, EnumType, OptionalType, ResultType),
+            ):
+                return OptionalType(payload_type)
+            self._diagnose(
+                "TYPE_MISMATCH", "Optional payload must be a value type.", argument.value.span
+            )
+            return PrimitiveType.ERROR
+        if not isinstance(expected, ResultType):
+            self._infer(argument.value)
+            self._diagnose(
+                "TYPE_CANNOT_INFER_RESULT_TYPE",
+                f"Cannot infer the complete Result type for '{name}'.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        target = expected.ok_type if name == "ok" else expected.err_type
+        payload_type = self._infer(argument.value, target)
+        if not is_assignable(payload_type, target):
+            self._diagnose(
+                "TYPE_MISMATCH",
+                f"Cannot construct {format_type(expected)} from {format_type(payload_type)}.",
+                argument.value.span,
+            )
+        return expected
 
     def _infer_print_call(
         self, expression: CallExpression, argument_types: list[SemanticType]

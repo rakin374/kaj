@@ -387,9 +387,14 @@ class Parser:
         )
         cases: list[MatchCase] = []
         while not self._check(TokenKind.RIGHT_BRACE) and not self._check(TokenKind.EOF):
-            variant = self._consume(
-                TokenKind.IDENTIFIER, PARSE_EXPECTED_IDENTIFIER, "Expected an enum variant pattern."
-            )
+            if self._check(TokenKind.IDENTIFIER) or self._check(TokenKind.NONE):
+                variant = self._advance()
+            else:
+                self._raise(
+                    PARSE_EXPECTED_IDENTIFIER,
+                    "Expected an enum variant pattern.",
+                    self._current().span,
+                )
             bindings: list[PatternBinding] = []
             pattern_end = variant.span.end
             if self._match(TokenKind.LEFT_PAREN):
