@@ -1,3 +1,10 @@
 # Kaj Examples
 
-Example Kaj programs live here.
+These programs are valid, executable Kaj v0 examples. Run one with:
+
+```bash
+kaj check examples/hello.kaj
+kaj run examples/hello.kaj
+```
+
+The `modules/` directory is a complete local module project whose entry file is `main.kaj`.

@@ -1,0 +1,13 @@
+var count = 0
+while count < 2 {
+    print(count)
+    count += 1
+}
+if count == 2 {
+    print("done")
+} else {
+    print("unexpected")
+}
+for value in [3, 4] {
+    print(value)
+}

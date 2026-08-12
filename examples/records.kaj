@@ -1,0 +1,9 @@
+type Address { city: String }
+type User { name: String address: Address }
+
+let user = User {
+    name: "Alice",
+    address: Address { city: "Montreal" },
+}
+print(user.name)
+print(user.address.city)

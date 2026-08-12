@@ -1,0 +1,4 @@
+let total = 2 + 3 * 4
+let quotient = 5 / 2
+print(total)
+print(quotient)

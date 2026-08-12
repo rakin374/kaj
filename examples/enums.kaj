@@ -1,0 +1,10 @@
+enum Message {
+    quit
+    text(value: String)
+}
+
+let message = Message.text(value: "hello")
+match message {
+    quit => print("quit")
+    text(value) => print(value)
+}

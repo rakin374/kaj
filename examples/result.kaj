@@ -1,0 +1,8 @@
+fn load() -> Result<Int, String> {
+    return ok(42)
+}
+
+match load() {
+    ok(value) => print(value)
+    err(message) => print(message)
+}

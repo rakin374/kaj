@@ -2,7 +2,7 @@
 
 **Status:** Authoritative for Kaj v0 CLI behavior  
 **Scope:** `kaj check`, `kaj run`, `kaj fmt`, `kaj ast`, `kaj --version`, diagnostics, and exit-code classes  
-**Not covered:** package management, REPL, watch mode, LSP integration, project manifests, multi-file module builds
+**Not covered:** package management, REPL, watch mode, LSP integration, or project manifests
 
 ---
 
@@ -36,9 +36,8 @@ kaj ast <file>
 kaj --version
 ```
 
-Each source-oriented command operates on one `.kaj` source file in v0.
-
-Multi-file module execution belongs to the imports/modules checkpoint.
+Each source-oriented command names one entry `.kaj` file. `check` and `run` load its reachable local
+module graph; `fmt` and `ast` intentionally operate on the named file only.
 
 ---
 

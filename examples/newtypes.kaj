@@ -1,0 +1,7 @@
+newtype UserId = String
+newtype OrderId = String
+
+let user_id = UserId("u-1")
+let order_id = OrderId("o-1")
+print(user_id.value)
+print(order_id.value)

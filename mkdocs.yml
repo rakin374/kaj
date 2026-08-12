@@ -1,0 +1,53 @@
+site_name: Kaj
+site_description: Documentation for the Kaj programming language
+theme:
+  name: material
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - First Program: getting-started/first-program.md
+      - CLI: getting-started/cli.md
+  - Guide:
+      - Overview: guide/index.md
+      - Kaj by Example: guide/kaj-by-example.md
+      - Variables: guide/variables.md
+      - Types: guide/types.md
+      - Operators: guide/operators.md
+      - Control Flow: guide/control-flow.md
+      - Functions: guide/functions.md
+      - Lists: guide/lists.md
+      - Maps: guide/maps.md
+      - Records: guide/records.md
+      - Enums and Match: guide/enums-and-match.md
+      - Optional and Result: guide/optional-and-result.md
+      - Newtypes: guide/newtypes.md
+      - Modules: guide/modules.md
+  - Language Reference:
+      - Lexical Structure: language/lexical-structure.md
+      - Primitive Types: language/primitive-types.md
+      - Functions: language/functions.md
+      - Lists: language/lists.md
+      - Records: language/records.md
+      - Enums and Match: language/enums-and-match.md
+      - Optional and Result: language/optional-and-result.md
+      - Maps: language/maps.md
+      - Newtypes: language/newtypes.md
+      - Formatting: language/formatting.md
+      - Imports: language/imports.md
+  - Compiler:
+      - AST JSON: compiler/ast-json.md
+  - Internals:
+      - AST: internals/ast.md
+      - Name Resolution: internals/name-resolution.md
+      - Interpreter: internals/interpreter.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+strict: true

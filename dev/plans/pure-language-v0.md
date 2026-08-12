@@ -9,8 +9,8 @@
 
 # Implementation Status
 
-**Current checkpoint:** Checkpoint 17 — Module Imports
-**Status:** Complete
+**Current checkpoint:** Checkpoint 18 — Pure Language Test Suite
+**Status:** Complete — pure-language core ready for agentic work
 
 ## Completed
 
@@ -109,6 +109,14 @@
   cycle/missing/duplicate/member diagnostics, and path-aware dependency diagnostics.
 - Once-only dependency initialization with shared runtime module namespaces, qualified function
   calls and nominal type construction, while `fmt` and `ast` remain intentionally single-file.
+- A public-pipeline conformance harness with exact ordered diagnostic-code assertions that reject
+  unexpected cascades, plus an implementation-wide stable diagnostic inventory.
+- Full single-module and multi-module composition programs covering nominal types, collections,
+  tagged values, matching, loops, formatting, imports, qualified types/functions, and execution.
+- Offline deterministic conformance verification across lexer, parser, spans, AST JSON, resolution,
+  typing, formatting, runtime, CLI, and modules, with all prior checkpoint tests retained.
+- A complete user-facing documentation path from installation and quickstart through focused
+  feature guides, backed by an executable example corpus and strict MkDocs validation.
 - An explicit host builtin scope containing only narrowly typed `print`, with deterministic
   primitive formatting and an injectable output sink.
 - Structured runtime failures for division by zero, invalid operations, and internal-state errors,

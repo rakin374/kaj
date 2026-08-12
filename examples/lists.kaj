@@ -1,0 +1,5 @@
+let values: List<Decimal> = [1, 2.5, 3]
+print(values.count)
+for value in values {
+    print(value)
+}

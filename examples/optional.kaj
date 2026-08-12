@@ -1,0 +1,5 @@
+let value: Optional<String> = some("Alice")
+match value {
+    some(name) => print(name)
+    none => print("missing")
+}

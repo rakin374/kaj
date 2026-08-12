@@ -1,0 +1,6 @@
+let ages = {"Alice": 30, "Bob": 40}
+print(ages.count)
+match ages["Alice"] {
+    some(age) => print(age)
+    none => print("missing")
+}
