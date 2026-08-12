@@ -1,6 +1,6 @@
 # Kaj VS Code Extension — Initial Editor Support
 
-**Status:** Implementation milestone  
+**Status:** Complete  
 **Scope:** VS Code recognition for `.kaj`, syntax highlighting, language configuration, indentation/brackets, and formatter command integration  
 **Out of scope:** LSP, semantic diagnostics, autocomplete, hover, go-to-definition, rename, references, package registry publishing
 

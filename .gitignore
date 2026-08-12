@@ -109,5 +109,13 @@ temp/
 
 *.kaj.ir.json
 
+# ------------------------------------------------------------
+# VS Code extension build/dependencies
+# ------------------------------------------------------------
+
+editors/vscode/node_modules/
+editors/vscode/out/
+editors/vscode/*.vsix
+
 # Do not ignore Kaj AST JSON globally.
 # AST fixtures and schemas may intentionally be committed.
