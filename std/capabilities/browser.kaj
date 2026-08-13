@@ -1,0 +1,46 @@
+newtype ElementId = String
+
+newtype PageGeneration = Int
+
+type BrowserViewport {
+    width: Int
+    height: Int
+    scroll_x: Int
+    scroll_y: Int
+}
+
+type BrowserElement {
+    id: ElementId
+    role: String
+    text: String
+    enabled: Bool
+    visible: Bool
+}
+
+type PageObservation {
+    url: String
+    title: String
+    generation: PageGeneration
+    viewport: BrowserViewport
+    elements: List<BrowserElement>
+}
+
+enum BrowserError {
+    unavailable
+    invalid_url
+    navigation_failed(message: String)
+    element_not_found
+    stale_element
+    element_not_interactable
+    invalid_selection
+    action_failed(message: String)
+}
+
+capability Browser {
+    fn observe() -> Result<PageObservation, BrowserError>
+    fn navigate(url: String) -> Result<PageObservation, BrowserError>
+    fn click(element: ElementId, generation: PageGeneration) -> Result<PageObservation, BrowserError>
+    fn type_text(element: ElementId, generation: PageGeneration, text: String) -> Result<PageObservation, BrowserError>
+    fn select(element: ElementId, generation: PageGeneration, value: String) -> Result<PageObservation, BrowserError>
+    fn scroll(delta_x: Int, delta_y: Int) -> Result<PageObservation, BrowserError>
+}

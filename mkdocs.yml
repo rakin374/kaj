@@ -55,6 +55,8 @@ nav:
   - Integrations:
       - Overview: integrations/index.md
       - Standard Capabilities: integrations/standard-capabilities.md
+  - Standard Capabilities:
+      - Browser: capabilities/browser.md
   - Compiler:
       - AST JSON: compiler/ast-json.md
   - Internals:
