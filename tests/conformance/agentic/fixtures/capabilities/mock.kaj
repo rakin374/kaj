@@ -1,0 +1,8 @@
+capability Counter {
+    fn read() -> Int
+}
+
+task Read() -> Int {
+    use Counter as counter
+    return counter.read()
+}

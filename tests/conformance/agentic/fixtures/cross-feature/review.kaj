@@ -1,0 +1,13 @@
+task Review() -> Bool {
+    goal "Receive durable human approval"
+    invariant {
+        true
+    }
+    success(result: Bool) {
+        result
+    }
+    step approval {
+        return confirm("Approve?")
+    }
+    return false
+}

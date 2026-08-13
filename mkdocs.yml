@@ -40,6 +40,18 @@ nav:
       - Newtypes: language/newtypes.md
       - Formatting: language/formatting.md
       - Imports: language/imports.md
+  - Agentic Kaj:
+      - Overview: agentic/index.md
+      - Tasks: agentic/kaj-agentic-tasks-spec.md
+      - Steps and Task Lifecycle: agentic/kaj-agentic-steps-and-lifecycle-spec.md
+      - Task Contracts: agentic/task-contracts.md
+      - Human Interaction: agentic/human-interaction.md
+      - Persistence and Resume: agentic/persistence-resume.md
+      - Capabilities: agentic/capabilities.md
+      - Task Composition: agentic/task-composition.md
+      - Planner Interface: agentic/planner-interface.md
+      - Controlled Replanning: agentic/controlled-replanning.md
+      - Agentic Conformance: agentic/agentic-conformance.md
   - Compiler:
       - AST JSON: compiler/ast-json.md
   - Internals:

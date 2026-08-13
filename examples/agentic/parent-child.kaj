@@ -1,0 +1,8 @@
+task Child(value: Int) -> Int {
+    return value * 2
+}
+
+task Parent() -> Int {
+    let child = start Child(21)
+    return await child
+}

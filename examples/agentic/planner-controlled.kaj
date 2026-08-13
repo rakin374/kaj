@@ -1,0 +1,6 @@
+task PlannedWork() -> Int {
+    goal "Complete validated planner-owned work"
+    plan {
+    }
+    return 42
+}

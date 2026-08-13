@@ -1,1 +1,1 @@
-"""Kaj pure-language conformance suite."""
+"""Cross-implementation conformance fixtures and tests."""

@@ -8,6 +8,7 @@ from kaj.ast import (
     FunctionDeclaration,
     ImportDeclaration,
     Program,
+    TaskDeclaration,
 )
 from kaj.diagnostics import Diagnostic
 from kaj.modules.names import ModuleName
@@ -226,7 +227,7 @@ def _exports(
 ) -> ModuleType:
     values: list[tuple[str, SemanticType]] = []
     for statement in module.program.statements:
-        if isinstance(statement, (FunctionDeclaration, BindingDeclaration)):
+        if isinstance(statement, (FunctionDeclaration, TaskDeclaration, BindingDeclaration)):
             symbol = resolution.symbol_for_declaration(statement)
             semantic_type = None if symbol is None else types.type_of_symbol(symbol)
             if semantic_type is not None:

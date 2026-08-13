@@ -268,6 +268,17 @@ Kaj v0 keywords:
 let
 var
 fn
+task
+step
+goal
+require
+invariant
+success
+ask
+choose
+confirm
+inform
+handoff
 return
 
 if
@@ -314,20 +325,9 @@ Do not reserve speculative future keywords.
 In particular, these agent/capability terms are not lexer keywords yet:
 
 ```text
-task
-step
-goal
-success
-require
-invariant
 expect
 verify
 observe
-ask
-choose
-confirm
-inform
-handoff
 use
 uses
 ```

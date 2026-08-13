@@ -68,6 +68,50 @@ class ContinueStatement(Statement):
 
 
 @dataclass(frozen=True)
+class StepStatement(Statement):
+    name: str
+    body: Block
+
+
+@dataclass(frozen=True)
+class UseCapabilityDeclaration(Statement):
+    capability_name: str
+    alias: str
+
+
+@dataclass(frozen=True)
+class PlanRegion(Statement):
+    body: Block
+
+
+@dataclass(frozen=True)
+class GoalClause(Statement):
+    expression: Expression
+
+
+@dataclass(frozen=True)
+class RequireClause(Statement):
+    condition: Expression
+
+
+@dataclass(frozen=True)
+class InvariantClause(Statement):
+    condition: Expression
+
+
+@dataclass(frozen=True)
+class SuccessParameter(Node):
+    name: str
+    type_annotation: TypeExpression
+
+
+@dataclass(frozen=True)
+class SuccessClause(Statement):
+    parameter: SuccessParameter | None
+    condition: Expression
+
+
+@dataclass(frozen=True)
 class ReturnStatement(Statement):
     value: Expression | None
 

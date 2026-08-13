@@ -1,0 +1,12 @@
+task Positive(value: Int) -> Int {
+    require {
+        value > 0
+    }
+    invariant {
+        value > 0
+    }
+    success(result: Int) {
+        result == value
+    }
+    return value
+}

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from kaj.ast import (
     AssignmentStatement,
+    AwaitTaskExpression,
     BinaryExpression,
     BindingDeclaration,
     BindingKind,
@@ -11,6 +12,7 @@ from kaj.ast import (
     BooleanLiteral,
     BreakStatement,
     CallExpression,
+    CapabilityDeclaration,
     ContinueStatement,
     DecimalLiteral,
     EnumConstructionExpression,
@@ -19,12 +21,15 @@ from kaj.ast import (
     ExpressionStatement,
     ForStatement,
     FunctionDeclaration,
+    GoalClause,
+    HumanInteractionExpression,
     Identifier,
     IfStatement,
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     InterpolatedString,
+    InvariantClause,
     ListLiteral,
     MapLiteral,
     MatchStatement,
@@ -32,13 +37,20 @@ from kaj.ast import (
     NewtypeDeclaration,
     Node,
     NoneLiteral,
+    PlanRegion,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
+    RequireClause,
     ReturnStatement,
+    StartTaskExpression,
     Statement,
+    StepStatement,
     StringLiteral,
+    SuccessClause,
+    TaskDeclaration,
     UnaryExpression,
+    UseCapabilityDeclaration,
     WhileStatement,
 )
 from kaj.diagnostics import Diagnostic
@@ -121,18 +133,28 @@ class Resolver:
                 )
 
         for statement in program.statements:
-            if isinstance(statement, FunctionDeclaration):
+            if isinstance(statement, (FunctionDeclaration, TaskDeclaration)):
                 self._declare(
                     module_scope,
                     statement.name,
-                    SymbolKind.FUNCTION,
+                    SymbolKind.FUNCTION
+                    if isinstance(statement, FunctionDeclaration)
+                    else SymbolKind.TASK,
+                    statement.span,
+                    statement,
+                )
+            elif isinstance(statement, CapabilityDeclaration):
+                self._declare(
+                    module_scope,
+                    statement.name,
+                    SymbolKind.CAPABILITY,
                     statement.span,
                     statement,
                 )
 
         for statement in program.statements:
-            if isinstance(statement, FunctionDeclaration):
-                self._resolve_function(statement, module_scope)
+            if isinstance(statement, (FunctionDeclaration, TaskDeclaration)):
+                self._resolve_callable(statement, module_scope)
             else:
                 self._resolve_statement(statement, module_scope)
 
@@ -172,7 +194,9 @@ class Resolver:
         self._declarations.append(DeclaredSymbol(declaration, symbol))
         return symbol
 
-    def _resolve_function(self, declaration: FunctionDeclaration, module_scope: Scope) -> None:
+    def _resolve_callable(
+        self, declaration: FunctionDeclaration | TaskDeclaration, module_scope: Scope
+    ) -> None:
         function_scope = Scope(ScopeKind.FUNCTION, module_scope)
         for parameter in declaration.parameters:
             self._declare(
@@ -182,6 +206,71 @@ class Resolver:
                 parameter.span,
                 parameter,
             )
+        if isinstance(declaration, TaskDeclaration):
+            step_names: set[str] = set()
+            goal_seen = False
+            success_seen = False
+            plan_seen = False
+            for statement in declaration.body.statements:
+                if isinstance(statement, PlanRegion):
+                    if plan_seen:
+                        self._diagnostics.append(
+                            Diagnostic(
+                                "TASK_DUPLICATE_PLAN_REGION",
+                                "A task may contain only one plan region.",
+                                statement.span,
+                            )
+                        )
+                    plan_seen = True
+                if isinstance(statement, UseCapabilityDeclaration):
+                    if function_scope.lookup_local(statement.alias) is not None:
+                        self._diagnostics.append(
+                            Diagnostic(
+                                "CAPABILITY_DUPLICATE_ALIAS",
+                                f"Capability alias '{statement.alias}' is already declared.",
+                                statement.span,
+                            )
+                        )
+                    else:
+                        self._declare(
+                            function_scope,
+                            statement.alias,
+                            SymbolKind.CAPABILITY_ALIAS,
+                            statement.span,
+                            statement,
+                        )
+                if isinstance(statement, GoalClause):
+                    if goal_seen:
+                        self._diagnostics.append(
+                            Diagnostic(
+                                "TASK_DUPLICATE_GOAL",
+                                f"Task '{declaration.name}' declares more than one goal.",
+                                statement.span,
+                            )
+                        )
+                    goal_seen = True
+                if isinstance(statement, SuccessClause):
+                    if success_seen:
+                        self._diagnostics.append(
+                            Diagnostic(
+                                "TASK_DUPLICATE_SUCCESS",
+                                f"Task '{declaration.name}' declares more than one success clause.",
+                                statement.span,
+                            )
+                        )
+                    success_seen = True
+                if not isinstance(statement, StepStatement):
+                    continue
+                if statement.name in step_names:
+                    self._diagnostics.append(
+                        Diagnostic(
+                            "TASK_DUPLICATE_STEP",
+                            f"Step '{statement.name}' is declared more than once in task "
+                            f"'{declaration.name}'.",
+                            statement.span,
+                        )
+                    )
+                step_names.add(statement.name)
         self._resolve_statements(declaration.body.statements, function_scope)
 
     def _resolve_statements(self, statements: tuple[Statement, ...], scope: Scope) -> None:
@@ -243,7 +332,26 @@ class Resolver:
                     self._resolve_statement(case.body, case_scope)
         elif isinstance(statement, Block):
             self._resolve_block(statement, scope)
-        elif isinstance(statement, FunctionDeclaration):
+        elif isinstance(statement, (StepStatement, PlanRegion)):
+            self._resolve_block(statement.body, scope)
+        elif isinstance(statement, UseCapabilityDeclaration):
+            return
+        elif isinstance(statement, GoalClause):
+            self._resolve_expression(statement.expression, scope)
+        elif isinstance(statement, (RequireClause, InvariantClause)):
+            self._resolve_expression(statement.condition, scope)
+        elif isinstance(statement, SuccessClause):
+            success_scope = Scope(ScopeKind.BLOCK, scope)
+            if statement.parameter is not None:
+                self._declare(
+                    success_scope,
+                    statement.parameter.name,
+                    SymbolKind.PARAMETER,
+                    statement.parameter.span,
+                    statement.parameter,
+                )
+            self._resolve_expression(statement.condition, success_scope)
+        elif isinstance(statement, (FunctionDeclaration, TaskDeclaration)):
             # Named functions are module-level only in Kaj v0. Valid parsed programs
             # reach function declarations through the module traversal above.
             return
@@ -254,6 +362,7 @@ class Resolver:
                 EnumDeclaration,
                 NewtypeDeclaration,
                 ImportDeclaration,
+                CapabilityDeclaration,
                 BreakStatement,
                 ContinueStatement,
             ),
@@ -291,6 +400,23 @@ class Resolver:
                 self._resolve_expression(expression.callee, scope)
             for argument in expression.arguments:
                 self._resolve_expression(argument.value, scope)
+        elif isinstance(expression, HumanInteractionExpression):
+            for argument in expression.arguments:
+                self._resolve_expression(argument.value, scope)
+        elif isinstance(expression, StartTaskExpression):
+            symbol = scope.lookup(expression.task_name)
+            if symbol is None:
+                self._diagnostics.append(
+                    Diagnostic(
+                        "TASK_START_UNKNOWN_TASK",
+                        f"Unknown task '{expression.task_name}'.",
+                        expression.span,
+                    )
+                )
+            for argument in expression.arguments:
+                self._resolve_expression(argument.value, scope)
+        elif isinstance(expression, AwaitTaskExpression):
+            self._resolve_expression(expression.operand, scope)
         elif isinstance(expression, MemberAccessExpression):
             self._resolve_expression(expression.object, scope)
         elif isinstance(expression, IndexExpression):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from kaj.ast import (
     AssignmentOperator,
     AssignmentStatement,
+    AwaitTaskExpression,
     BinaryExpression,
     BinaryOperator,
     BindingDeclaration,
@@ -13,6 +14,7 @@ from kaj.ast import (
     BreakStatement,
     CallArgument,
     CallExpression,
+    CapabilityDeclaration,
     ContinueStatement,
     DecimalLiteral,
     EnumConstructionExpression,
@@ -23,12 +25,15 @@ from kaj.ast import (
     ForStatement,
     FunctionDeclaration,
     GenericType,
+    GoalClause,
+    HumanInteractionExpression,
     Identifier,
     IfStatement,
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     InterpolatedString,
+    InvariantClause,
     ListLiteral,
     MapLiteral,
     MatchCase,
@@ -36,18 +41,26 @@ from kaj.ast import (
     MemberAccessExpression,
     NamedType,
     NewtypeDeclaration,
+    Node,
     NoneLiteral,
     Parameter,
+    PlanRegion,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
     RecordFieldInitializer,
+    RequireClause,
     ReturnStatement,
+    StartTaskExpression,
     Statement,
+    StepStatement,
     StringLiteral,
+    SuccessClause,
+    TaskDeclaration,
     TypeExpression,
     UnaryExpression,
     UnaryOperator,
+    UseCapabilityDeclaration,
     WhileStatement,
 )
 from kaj.diagnostics import Diagnostic
@@ -56,6 +69,8 @@ from kaj.semantic.symbols import Symbol, SymbolKind
 from kaj.semantic.types import (
     PRIMITIVE_TYPES_BY_NAME,
     BuiltinFunctionType,
+    CapabilityOperationType,
+    CapabilityType,
     EnumDefinition,
     EnumPayloadFieldType,
     EnumType,
@@ -76,6 +91,8 @@ from kaj.semantic.types import (
     RecordType,
     ResultType,
     SemanticType,
+    TaskHandleType,
+    TaskType,
     TypeSymbol,
     ValueType,
     format_type,
@@ -190,7 +207,11 @@ class TypeCheckResult:
 
     def newtype_definition(self, newtype_type: NewtypeType) -> NewtypeDefinition | None:
         return next(
-            (item for item in (*self.newtypes, *self.imported_newtypes) if item.type == newtype_type),
+            (
+                item
+                for item in (*self.newtypes, *self.imported_newtypes)
+                if item.type == newtype_type
+            ),
             None,
         )
 
@@ -207,10 +228,12 @@ class TypeChecker:
         self._expression_types: dict[int, TypedExpression] = {}
         self._symbol_types: dict[int, TypedSymbol] = {}
         self._mutable_symbols: dict[int, bool] = {}
-        self._function_types: dict[int, FunctionType] = {}
+        self._function_types: dict[int, FunctionType | TaskType] = {}
         self._mapped_arguments: list[MappedArgument] = []
         self._diagnostics: list[Diagnostic] = []
         self._current_return_type: ValueType | None = None
+        self._current_task_return_type: ValueType | None = None
+        self._inside_task = False
         self._loop_depth = 0
         self._record_types_by_name: dict[str, RecordType] = {}
         self._record_types_by_declaration: dict[int, RecordType] = {}
@@ -225,6 +248,9 @@ class TypeChecker:
         self._newtype_types_by_name: dict[str, NewtypeType] = {}
         self._newtype_types_by_declaration: dict[int, NewtypeType] = {}
         self._newtype_definitions: list[NewtypeDefinition] = []
+        self._function_declarations: dict[int, FunctionDeclaration] = {}
+        self._function_purity: dict[int, bool] = {}
+        self._capability_types_by_name: dict[str, CapabilityType] = {}
         self._imported_modules = {} if imported_modules is None else imported_modules
         self._type_id_base = type_id_base
 
@@ -236,6 +262,8 @@ class TypeChecker:
         self._mapped_arguments = []
         self._diagnostics = []
         self._current_return_type = None
+        self._current_task_return_type = None
+        self._inside_task = False
         self._loop_depth = 0
         self._record_types_by_name = {}
         self._record_types_by_declaration = {}
@@ -250,10 +278,14 @@ class TypeChecker:
         self._newtype_types_by_name = {}
         self._newtype_types_by_declaration = {}
         self._newtype_definitions = []
+        self._function_declarations = {}
+        self._function_purity = {}
+        self._capability_types_by_name = {}
         self._predeclare_types(program)
         self._define_newtypes(program)
         self._define_records(program)
         self._define_enums(program)
+        self._define_capabilities(program)
         builtin_types = {
             "print": BuiltinFunctionType.PRINT,
             "range": BuiltinFunctionType.RANGE,
@@ -271,8 +303,12 @@ class TypeChecker:
                 if import_symbol is not None and module_type is not None:
                     self._record_symbol(import_symbol, module_type)
         for statement in program.statements:
+            if isinstance(statement, (FunctionDeclaration, TaskDeclaration)):
+                self._declare_callable_signature(statement)
             if isinstance(statement, FunctionDeclaration):
-                self._declare_function_signature(statement)
+                declaration_symbol = self._resolution.symbol_for_declaration(statement)
+                if declaration_symbol is not None:
+                    self._function_declarations[declaration_symbol.id] = statement
         for statement in program.statements:
             self._check_statement(statement)
         return TypeCheckResult(
@@ -303,6 +339,41 @@ class TypeChecker:
             ),
             diagnostics=tuple(self._diagnostics),
         )
+
+    def _define_capabilities(self, program: Program) -> None:
+        for declaration in program.statements:
+            if not isinstance(declaration, CapabilityDeclaration):
+                continue
+            seen: set[str] = set()
+            operations: list[CapabilityOperationType] = []
+            for operation in declaration.operations:
+                if operation.name in seen:
+                    self._diagnose(
+                        "CAPABILITY_DUPLICATE_OPERATION",
+                        f"Capability operation '{operation.name}' is declared more than once.",
+                        operation.span,
+                    )
+                seen.add(operation.name)
+                parameters = tuple(
+                    FunctionParameterType(
+                        parameter.name,
+                        self._resolve_annotation(parameter.type_annotation),
+                        False,
+                    )
+                    for parameter in operation.parameters
+                )
+                operations.append(
+                    CapabilityOperationType(
+                        operation.name,
+                        parameters,
+                        self._resolve_annotation(operation.return_type),
+                    )
+                )
+            capability_type = CapabilityType(declaration.name, tuple(operations))
+            self._capability_types_by_name[declaration.name] = capability_type
+            symbol = self._resolution.symbol_for_declaration(declaration)
+            if symbol is not None:
+                self._record_symbol(symbol, capability_type)
 
     def _module_record_definitions(self, module: ModuleType) -> tuple[RecordDefinition, ...]:
         return module.records + tuple(
@@ -469,7 +540,9 @@ class TypeChecker:
                 variants.append(EnumVariant(variant.name, tuple(payload), variant.span))
             self._enum_definitions.append(EnumDefinition(enum_type, tuple(variants)))
 
-    def _declare_function_signature(self, declaration: FunctionDeclaration) -> None:
+    def _declare_callable_signature(
+        self, declaration: FunctionDeclaration | TaskDeclaration
+    ) -> None:
         parameters = tuple(
             FunctionParameterType(
                 name=parameter.name,
@@ -478,7 +551,8 @@ class TypeChecker:
             )
             for parameter in declaration.parameters
         )
-        signature = FunctionType(
+        signature_type = FunctionType if isinstance(declaration, FunctionDeclaration) else TaskType
+        signature = signature_type(
             parameters=parameters,
             return_type=self._resolve_annotation(declaration.return_type),
         )
@@ -547,6 +621,15 @@ class TypeChecker:
                     self._resolve_annotation(annotation.arguments[0]),
                     self._resolve_annotation(annotation.arguments[1]),
                 )
+            if annotation.base.name == "TaskHandle":
+                if len(annotation.arguments) != 1:
+                    self._diagnose(
+                        "TYPE_INVALID_TYPE_ARGUMENTS",
+                        "TaskHandle requires exactly one type argument.",
+                        annotation.span,
+                    )
+                    return PrimitiveType.ERROR
+                return TaskHandleType(self._resolve_annotation(annotation.arguments[0]))
             if annotation.base.name == "Map":
                 if len(annotation.arguments) != 2:
                     self._diagnose(
@@ -662,7 +745,7 @@ class TypeChecker:
                 self._check_block(statement.body)
             finally:
                 self._loop_depth -= 1
-        elif isinstance(statement, FunctionDeclaration):
+        elif isinstance(statement, (FunctionDeclaration, TaskDeclaration)):
             signature = self._function_types.get(id(statement))
             if signature is None:
                 # Named functions are module-level only in Kaj v0. The parser's
@@ -673,29 +756,79 @@ class TypeChecker:
             ):
                 self._check_parameter(parameter, descriptor.type)
             previous_return_type = self._current_return_type
+            previous_task_return_type = self._current_task_return_type
+            previous_inside_task = self._inside_task
             self._current_return_type = signature.return_type
+            self._current_task_return_type = (
+                signature.return_type if isinstance(statement, TaskDeclaration) else None
+            )
+            self._inside_task = isinstance(statement, TaskDeclaration)
             self._check_block(statement.body)
             self._current_return_type = previous_return_type
+            self._current_task_return_type = previous_task_return_type
+            self._inside_task = previous_inside_task
             if signature.return_type not in (
                 PrimitiveType.NONE,
                 PrimitiveType.ERROR,
             ) and not self._block_definitely_returns(statement.body):
                 self._diagnose(
                     "TYPE_MISSING_RETURN",
-                    f"Function '{statement.name}' may reach its end without returning.",
+                    f"{'Function' if isinstance(statement, FunctionDeclaration) else 'Task'} "
+                    f"'{statement.name}' may reach its end without returning.",
                     statement.span,
                 )
         elif isinstance(
             statement,
-            (RecordDeclaration, EnumDeclaration, NewtypeDeclaration, ImportDeclaration),
+            (
+                RecordDeclaration,
+                EnumDeclaration,
+                NewtypeDeclaration,
+                ImportDeclaration,
+                CapabilityDeclaration,
+            ),
         ):
             return
+        elif isinstance(statement, UseCapabilityDeclaration):
+            capability_type = self._capability_types_by_name.get(statement.capability_name)
+            if capability_type is None:
+                self._diagnose(
+                    "CAPABILITY_UNKNOWN_TYPE",
+                    f"Unknown capability type '{statement.capability_name}'.",
+                    statement.span,
+                )
+                return
+            symbol = self._resolution.symbol_for_declaration(statement)
+            if symbol is not None:
+                self._record_symbol(symbol, capability_type)
         elif isinstance(statement, MatchStatement):
             self._check_match(statement)
         elif isinstance(statement, ReturnStatement):
             self._check_return(statement)
         elif isinstance(statement, Block):
             self._check_block(statement)
+        elif isinstance(statement, (StepStatement, PlanRegion)):
+            self._check_block(statement.body)
+        elif isinstance(statement, GoalClause):
+            actual = self._infer(statement.expression, PrimitiveType.STRING)
+            if not is_assignable(actual, PrimitiveType.STRING):
+                self._diagnose(
+                    "TASK_GOAL_TYPE_MISMATCH",
+                    f"Goal must be String, not {format_type(actual)}.",
+                    statement.expression.span,
+                )
+            self._check_contract_purity(statement.expression, statement.span)
+        elif isinstance(statement, RequireClause):
+            self._check_contract_condition(
+                statement.condition, "TASK_REQUIRE_TYPE_MISMATCH", "Requirement"
+            )
+            self._check_contract_purity(statement.condition, statement.span)
+        elif isinstance(statement, InvariantClause):
+            self._check_contract_condition(
+                statement.condition, "TASK_INVARIANT_TYPE_MISMATCH", "Invariant"
+            )
+            self._check_contract_purity(statement.condition, statement.span)
+        elif isinstance(statement, SuccessClause):
+            self._check_success_clause(statement)
         elif isinstance(statement, BreakStatement):
             if self._loop_depth == 0:
                 self._diagnose(
@@ -712,6 +845,170 @@ class TypeChecker:
                 )
         else:
             raise TypeError(f"Unsupported statement node: {type(statement).__name__}")
+
+    def _check_contract_condition(self, expression: Expression, code: str, label: str) -> None:
+        actual = self._infer(expression, PrimitiveType.BOOL)
+        if not is_assignable(actual, PrimitiveType.BOOL):
+            self._diagnose(
+                code,
+                f"{label} must be Bool, not {format_type(actual)}.",
+                expression.span,
+            )
+
+    def _check_success_clause(self, clause: SuccessClause) -> None:
+        return_type = self._current_task_return_type
+        if return_type is None:
+            return
+        parameter = clause.parameter
+        if return_type is PrimitiveType.NONE:
+            if parameter is not None:
+                self._diagnose(
+                    "TASK_SUCCESS_PARAMETER_MISMATCH",
+                    "A success clause for a None task must not declare a result parameter.",
+                    parameter.span,
+                )
+        elif parameter is None:
+            self._diagnose(
+                "TASK_SUCCESS_PARAMETER_MISMATCH",
+                "A success clause for a value-returning task requires a result parameter.",
+                clause.span,
+            )
+        else:
+            parameter_type = self._resolve_annotation(parameter.type_annotation)
+            symbol = self._resolution.symbol_for_declaration(parameter)
+            if symbol is not None:
+                self._record_symbol(symbol, parameter_type)
+                self._mutable_symbols[symbol.id] = False
+            if parameter_type != return_type:
+                self._diagnose(
+                    "TASK_SUCCESS_PARAMETER_MISMATCH",
+                    f"Success parameter must be {format_type(return_type)}, not "
+                    f"{format_type(parameter_type)}.",
+                    parameter.type_annotation.span,
+                )
+        self._check_contract_condition(
+            clause.condition, "TASK_SUCCESS_TYPE_MISMATCH", "Success condition"
+        )
+        self._check_contract_purity(clause.condition, clause.span)
+
+    def _check_contract_purity(self, expression: Expression, span: SourceSpan) -> None:
+        if self._contains_task_composition(expression):
+            self._diagnose(
+                "TASK_COMPOSITION_NOT_ALLOWED_IN_CONTRACT",
+                "Task composition is not allowed in task contracts.",
+                span,
+            )
+            return
+        if self._contains_capability_call(expression):
+            self._diagnose(
+                "CAPABILITY_NOT_ALLOWED_IN_CONTRACT",
+                "Capability operations are not allowed in task contracts.",
+                span,
+            )
+            return
+        if self._contains_human_interaction(expression):
+            self._diagnose(
+                "TASK_HUMAN_INTERACTION_IN_CONTRACT",
+                "Human interaction is not allowed in task contracts.",
+                span,
+            )
+            return
+        if not self._is_pure_node(expression, set()):
+            self._diagnose(
+                "TASK_CONTRACT_NOT_PURE",
+                "Contract expressions may only call pure functions and pure builtins.",
+                span,
+            )
+
+    def _contains_human_interaction(self, node: object) -> bool:
+        if isinstance(node, HumanInteractionExpression):
+            return True
+        if isinstance(node, Node):
+            return any(
+                self._contains_human_interaction(getattr(node, item.name))
+                for item in fields(node)
+                if item.name != "span"
+            )
+        if isinstance(node, tuple):
+            return any(self._contains_human_interaction(item) for item in node)
+        return False
+
+    def _contains_capability_call(self, node: object) -> bool:
+        if (
+            isinstance(node, CallExpression)
+            and isinstance(node.callee, MemberAccessExpression)
+            and isinstance(node.callee.object, Identifier)
+        ):
+            symbol = self._resolution.symbol_for(node.callee.object)
+            if symbol is not None and symbol.kind is SymbolKind.CAPABILITY_ALIAS:
+                return True
+        if isinstance(node, Node):
+            return any(
+                self._contains_capability_call(getattr(node, item.name))
+                for item in fields(node)
+                if item.name != "span"
+            )
+        if isinstance(node, tuple):
+            return any(self._contains_capability_call(item) for item in node)
+        return False
+
+    def _contains_task_composition(self, node: object) -> bool:
+        if isinstance(node, (StartTaskExpression, AwaitTaskExpression)):
+            return True
+        if isinstance(node, Node):
+            return any(
+                self._contains_task_composition(getattr(node, item.name))
+                for item in fields(node)
+                if item.name != "span"
+            )
+        if isinstance(node, tuple):
+            return any(self._contains_task_composition(item) for item in node)
+        return False
+
+    def _is_pure_node(self, node: object, active: set[int]) -> bool:
+        if isinstance(node, HumanInteractionExpression):
+            return False
+        if isinstance(node, AssignmentStatement):
+            return False
+        if isinstance(node, CallExpression):
+            if isinstance(node.callee, Identifier):
+                symbol = self._resolution.symbol_for(node.callee)
+                if symbol is not None:
+                    if symbol.kind is SymbolKind.TASK:
+                        return False
+                    if symbol.kind is SymbolKind.BUILTIN_FUNCTION and symbol.name == "print":
+                        return False
+                    if symbol.kind is SymbolKind.FUNCTION:
+                        declaration = self._function_declarations.get(symbol.id)
+                        if declaration is None or not self._function_is_pure(
+                            symbol.id, declaration, active
+                        ):
+                            return False
+            elif isinstance(node.callee, MemberAccessExpression):
+                return False
+        if isinstance(node, Node):
+            return all(
+                self._is_pure_node(getattr(node, item.name), active)
+                for item in fields(node)
+                if item.name != "span"
+            )
+        if isinstance(node, tuple):
+            return all(self._is_pure_node(item, active) for item in node)
+        return True
+
+    def _function_is_pure(
+        self, symbol_id: int, declaration: FunctionDeclaration, active: set[int]
+    ) -> bool:
+        cached = self._function_purity.get(symbol_id)
+        if cached is not None:
+            return cached
+        if symbol_id in active:
+            return True
+        active.add(symbol_id)
+        pure = self._is_pure_node(declaration.body, active)
+        active.remove(symbol_id)
+        self._function_purity[symbol_id] = pure
+        return pure
 
     def _check_block(self, block: Block) -> None:
         for statement in block.statements:
@@ -814,13 +1111,48 @@ class TypeChecker:
             result = self._infer_binary_types(expression.operator, left, right, expression.span)
         elif isinstance(expression, CallExpression):
             result = self._infer_call(expression, expected)
+        elif isinstance(expression, HumanInteractionExpression):
+            result = self._infer_human_interaction(expression)
+        elif isinstance(expression, StartTaskExpression):
+            result = self._infer_start_task(expression)
+        elif isinstance(expression, AwaitTaskExpression):
+            operand = self._infer(expression.operand)
+            if not self._inside_task:
+                self._diagnose(
+                    "TASK_COMPOSITION_NOT_ALLOWED_IN_FUNCTION",
+                    "Task composition is only allowed inside tasks.",
+                    expression.span,
+                )
+            if isinstance(operand, TaskHandleType):
+                result = operand.result_type
+            else:
+                self._diagnose(
+                    "TASK_AWAIT_EXPECTED_HANDLE",
+                    "await requires a TaskHandle value.",
+                    expression.operand.span,
+                )
+                result = PrimitiveType.ERROR
         elif isinstance(expression, RecordConstructionExpression):
             result = self._infer_record_construction(expression)
         elif isinstance(expression, EnumConstructionExpression):
             result = self._infer_enum_construction(expression)
         elif isinstance(expression, MemberAccessExpression):
             object_type = self._infer(expression.object)
-            if isinstance(object_type, ListType):
+            if isinstance(object_type, CapabilityType):
+                operation = next(
+                    (item for item in object_type.operations if item.name == expression.member),
+                    None,
+                )
+                if operation is None:
+                    self._diagnose(
+                        "CAPABILITY_UNKNOWN_OPERATION",
+                        f"Capability '{object_type.name}' has no operation '{expression.member}'.",
+                        expression.span,
+                    )
+                    result = PrimitiveType.ERROR
+                else:
+                    result = operation
+            elif isinstance(object_type, ListType):
                 if expression.member == "count":
                     result = PrimitiveType.INT
                 elif expression.member in {"first", "last"}:
@@ -933,6 +1265,90 @@ class TypeChecker:
         else:
             raise TypeError(f"Unsupported expression node: {type(expression).__name__}")
         return self._record_expression(expression, result)
+
+    def _infer_start_task(self, expression: StartTaskExpression) -> SemanticType:
+        if not self._inside_task:
+            self._diagnose(
+                "TASK_COMPOSITION_NOT_ALLOWED_IN_FUNCTION",
+                "Task composition is only allowed inside tasks.",
+                expression.span,
+            )
+        symbol = self._resolution.module_scope.lookup(expression.task_name)
+        signature = None if symbol is None else self._symbol_types.get(symbol.id)
+        if signature is None or not isinstance(signature.type, TaskType):
+            for argument in expression.arguments:
+                self._infer(argument.value)
+            self._diagnose(
+                "TASK_START_TARGET_NOT_TASK",
+                f"'{expression.task_name}' is not a task.",
+                expression.span,
+            )
+            return PrimitiveType.ERROR
+        task_type = signature.type
+        for index, argument in enumerate(expression.arguments):
+            if index >= len(task_type.parameters):
+                self._infer(argument.value)
+                self._diagnose("TYPE_TOO_MANY_ARGUMENTS", "Too many task arguments.", argument.span)
+                continue
+            parameter = task_type.parameters[index]
+            actual = self._infer(argument.value, parameter.type)
+            if not is_assignable(actual, parameter.type):
+                self._diagnose(
+                    "TASK_START_ARGUMENT_MISMATCH",
+                    f"Cannot pass {format_type(actual)} to {format_type(parameter.type)}.",
+                    argument.span,
+                )
+        if len(expression.arguments) < len(task_type.parameters):
+            self._diagnose(
+                "TASK_START_ARGUMENT_MISMATCH", "Missing task argument.", expression.span
+            )
+        return TaskHandleType(task_type.return_type)
+
+    def _infer_human_interaction(self, expression: HumanInteractionExpression) -> SemanticType:
+        if not self._inside_task:
+            self._diagnose(
+                "TASK_HUMAN_INTERACTION_OUTSIDE_TASK",
+                "Human interaction is only allowed during task execution.",
+                expression.span,
+            )
+        expected_arity = 2 if expression.kind == "choose" else 1
+        if len(expression.arguments) != expected_arity:
+            self._diagnose(
+                "TYPE_ARGUMENT_COUNT_MISMATCH",
+                f"{expression.kind} expects {expected_arity} argument(s).",
+                expression.span,
+            )
+        if expression.arguments:
+            prompt_type = self._infer(expression.arguments[0].value, PrimitiveType.STRING)
+            if not is_assignable(prompt_type, PrimitiveType.STRING):
+                self._diagnose(
+                    "TASK_INTERACTION_PROMPT_TYPE_MISMATCH",
+                    f"Interaction prompt must be String, not {format_type(prompt_type)}.",
+                    expression.arguments[0].value.span,
+                )
+        if expression.kind in {"confirm", "inform", "handoff"}:
+            return PrimitiveType.BOOL if expression.kind == "confirm" else PrimitiveType.NONE
+        if expression.type_argument is None:
+            return PrimitiveType.ERROR
+        response_type = self._resolve_annotation(expression.type_argument)
+        if expression.kind == "choose" and len(expression.arguments) > 1:
+            options = expression.arguments[1].value
+            options_type = self._infer(options, ListType(response_type))
+            if not isinstance(options_type, ListType) or not is_assignable(
+                options_type.element_type, response_type
+            ):
+                self._diagnose(
+                    "TASK_CHOOSE_OPTIONS_TYPE_MISMATCH",
+                    f"choose options must be List<{format_type(response_type)}>.",
+                    options.span,
+                )
+            if isinstance(options, ListLiteral) and not options.elements:
+                self._diagnose(
+                    "TASK_CHOOSE_EMPTY_OPTIONS",
+                    "choose options must not be empty.",
+                    options.span,
+                )
+        return response_type
 
     def _infer_list(self, expression: ListLiteral, expected: SemanticType | None) -> SemanticType:
         if isinstance(expected, ListType):
@@ -1489,7 +1905,16 @@ class TypeChecker:
             return self._infer_print_call(expression, argument_types)
         if isinstance(callee_type, BuiltinFunctionType):
             return self._infer_builtin_call(expression, callee_type)
-        if not isinstance(callee_type, FunctionType):
+        if isinstance(callee_type, TaskType):
+            for argument in expression.arguments:
+                self._infer(argument.value)
+            self._diagnose(
+                "TASK_CANNOT_CALL_AS_FUNCTION",
+                "Tasks can only be started by the host runtime.",
+                expression.callee.span,
+            )
+            return PrimitiveType.ERROR
+        if not isinstance(callee_type, (FunctionType, CapabilityOperationType)):
             for argument in expression.arguments:
                 self._infer(argument.value)
             self._diagnose(
@@ -1798,6 +2223,8 @@ class TypeChecker:
             return True
         if isinstance(statement, Block):
             return self._block_definitely_returns(statement)
+        if isinstance(statement, StepStatement):
+            return self._block_definitely_returns(statement.body)
         if isinstance(statement, IfStatement):
             if statement.else_branch is None:
                 return False

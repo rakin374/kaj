@@ -1,0 +1,9 @@
+task ReplannedWork() -> Int {
+    goal "Allow the host to revise future planner-owned steps"
+    invariant {
+        true
+    }
+    plan {
+    }
+    return 42
+}

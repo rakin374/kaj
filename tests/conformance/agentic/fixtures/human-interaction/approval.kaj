@@ -1,0 +1,3 @@
+task Approval() -> Bool {
+    return confirm("Approve?")
+}

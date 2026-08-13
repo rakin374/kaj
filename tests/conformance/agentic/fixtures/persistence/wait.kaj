@@ -1,0 +1,4 @@
+task DurableWait() -> Int {
+    let value = ask<Int>("Value?")
+    return value
+}

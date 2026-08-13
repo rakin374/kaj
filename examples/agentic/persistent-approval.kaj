@@ -1,0 +1,6 @@
+task PersistentApproval() -> Bool {
+    step approval {
+        return confirm("Approve this durable task?")
+    }
+    return false
+}

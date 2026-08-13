@@ -71,6 +71,11 @@ class ResultType:
     err_type: ValueType
 
 
+@dataclass(frozen=True)
+class TaskHandleType:
+    result_type: ValueType
+
+
 type ValueType = (
     PrimitiveType
     | ListType
@@ -82,6 +87,7 @@ type ValueType = (
     | NewtypeType
     | OptionalType
     | ResultType
+    | TaskHandleType
 )
 
 
@@ -148,6 +154,25 @@ class FunctionType:
     return_type: ValueType
 
 
+@dataclass(frozen=True)
+class TaskType:
+    parameters: tuple[FunctionParameterType, ...]
+    return_type: ValueType
+
+
+@dataclass(frozen=True)
+class CapabilityOperationType:
+    name: str
+    parameters: tuple[FunctionParameterType, ...]
+    return_type: ValueType
+
+
+@dataclass(frozen=True)
+class CapabilityType:
+    name: str
+    operations: tuple[CapabilityOperationType, ...]
+
+
 class BuiltinFunctionType(Enum):
     PRINT = "print"
     RANGE = "range"
@@ -156,7 +181,15 @@ class BuiltinFunctionType(Enum):
     UTF8_DECODE = "utf8_decode"
 
 
-type SemanticType = ValueType | FunctionType | BuiltinFunctionType | ModuleType
+type SemanticType = (
+    ValueType
+    | FunctionType
+    | TaskType
+    | CapabilityType
+    | CapabilityOperationType
+    | BuiltinFunctionType
+    | ModuleType
+)
 
 
 PRIMITIVE_TYPES_BY_NAME: dict[str, PrimitiveType] = {
@@ -179,6 +212,11 @@ def format_type(semantic_type: SemanticType) -> str:
         return f"<builtin {semantic_type.value}>"
     if isinstance(semantic_type, ModuleType):
         return f"<module {semantic_type.name}>"
+    if isinstance(semantic_type, CapabilityType):
+        return f"capability {semantic_type.name}"
+    if isinstance(semantic_type, CapabilityOperationType):
+        parameters = ", ".join(format_type(item.type) for item in semantic_type.parameters)
+        return f"capability fn ({parameters}) -> {format_type(semantic_type.return_type)}"
     if isinstance(semantic_type, ListType):
         return f"List<{format_type(semantic_type.element_type)}>"
     if isinstance(semantic_type, MapType):
@@ -198,7 +236,10 @@ def format_type(semantic_type: SemanticType) -> str:
         return (
             f"Result<{format_type(semantic_type.ok_type)}, {format_type(semantic_type.err_type)}>"
         )
+    if isinstance(semantic_type, TaskHandleType):
+        return f"TaskHandle<{format_type(semantic_type.result_type)}>"
     if isinstance(semantic_type, (RecordType, EnumType, NewtypeType)):
         return semantic_type.symbol.name
     parameters = ", ".join(format_type(parameter.type) for parameter in semantic_type.parameters)
-    return f"({parameters}) -> {format_type(semantic_type.return_type)}"
+    prefix = "task " if isinstance(semantic_type, TaskType) else ""
+    return f"{prefix}({parameters}) -> {format_type(semantic_type.return_type)}"

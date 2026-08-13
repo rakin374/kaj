@@ -1,0 +1,7 @@
+{
+  "stale_human_response": "TASK_INTERACTION_STALE",
+  "stale_capability_response": "CAPABILITY_REQUEST_STALE",
+  "stale_planner_response": "PLANNER_ATTEMPT_STALE",
+  "corrupt_snapshot": "TASK_PERSISTENCE_CORRUPT",
+  "definition_mismatch": "TASK_DEFINITION_MISMATCH"
+}

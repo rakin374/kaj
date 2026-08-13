@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException, localcontext
 from typing import Never, cast
@@ -8,6 +8,7 @@ from typing import Never, cast
 from kaj.ast import (
     AssignmentOperator,
     AssignmentStatement,
+    AwaitTaskExpression,
     BinaryExpression,
     BinaryOperator,
     BindingDeclaration,
@@ -16,6 +17,7 @@ from kaj.ast import (
     BooleanLiteral,
     BreakStatement,
     CallExpression,
+    CapabilityDeclaration,
     ContinueStatement,
     DecimalLiteral,
     EnumConstructionExpression,
@@ -24,26 +26,37 @@ from kaj.ast import (
     ExpressionStatement,
     ForStatement,
     FunctionDeclaration,
+    GoalClause,
+    HumanInteractionExpression,
     Identifier,
     IfStatement,
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     InterpolatedString,
+    InvariantClause,
     ListLiteral,
     MapLiteral,
     MatchStatement,
     MemberAccessExpression,
     NewtypeDeclaration,
     NoneLiteral,
+    PlanRegion,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
+    RequireClause,
     ReturnStatement,
+    StartTaskExpression,
     Statement,
+    StepStatement,
     StringLiteral,
+    SuccessClause,
+    SuccessParameter,
+    TaskDeclaration,
     UnaryExpression,
     UnaryOperator,
+    UseCapabilityDeclaration,
     WhileStatement,
 )
 from kaj.runtime.environment import Environment
@@ -61,6 +74,7 @@ from kaj.runtime.values import (
     KajNewtypeValue,
     KajRange,
     KajRecord,
+    KajTaskHandle,
     RuntimeValue,
     decode_utf8,
 )
@@ -78,7 +92,9 @@ from kaj.semantic import (
     SemanticType,
     Symbol,
     SymbolKind,
+    TaskType,
     TypeCheckResult,
+    ValueType,
 )
 from kaj.source import SourceSpan
 
@@ -89,6 +105,78 @@ class ExecutionResult:
     output: str
     runtime_error: RuntimeErrorInfo | None
     exports: tuple[tuple[str, RuntimeValue], ...] = ()
+
+
+@dataclass
+class TaskExecutionContext:
+    declaration: TaskDeclaration
+    signature: TaskType
+    environment: Environment
+    statements: tuple[Statement, ...]
+    next_statement: int = 0
+
+
+@dataclass(frozen=True)
+class TaskExecutionOutcome:
+    statement: Statement | None
+    returned: bool
+    value: RuntimeValue
+    runtime_error: RuntimeErrorInfo | None
+    interaction: InteractionRequest | None = None
+    capability: CapabilitySuspension | None = None
+    task_await: TaskAwaitSuspension | None = None
+
+
+@dataclass(frozen=True)
+class InteractionRequest:
+    expression: HumanInteractionExpression
+    prompt: str
+    expected_type: ValueType
+    options: tuple[RuntimeValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class CapabilityInvocation:
+    expression: CallExpression
+    alias: str
+    operation: str
+    arguments: tuple[RuntimeValue, ...]
+    expected_type: ValueType
+
+
+@dataclass(frozen=True)
+class CapabilityInvocationResult:
+    pending: bool
+    value: RuntimeValue = None
+    request_id: str | None = None
+    retry_safe: bool = False
+
+
+@dataclass(frozen=True)
+class CapabilitySuspension:
+    invocation: CapabilityInvocation
+    result: CapabilityInvocationResult
+
+
+@dataclass(frozen=True)
+class TaskAwaitSuspension:
+    expression: AwaitTaskExpression
+    handle: KajTaskHandle
+
+
+class _HumanInteractionSignal(Exception):
+    def __init__(self, request: InteractionRequest) -> None:
+        self.request = request
+
+
+class _CapabilitySignal(Exception):
+    def __init__(self, suspension: CapabilitySuspension) -> None:
+        self.suspension = suspension
+
+
+class _TaskAwaitSignal(Exception):
+    def __init__(self, suspension: TaskAwaitSuspension) -> None:
+        self.suspension = suspension
 
 
 class _ReturnSignal(Exception):
@@ -105,6 +193,9 @@ class _ContinueSignal(Exception):
     pass
 
 
+_NO_INTERACTION_RESPONSE = object()
+
+
 class Interpreter:
     def __init__(
         self,
@@ -113,12 +204,25 @@ class Interpreter:
         *,
         output: RuntimeOutput | None = None,
         imported_modules: dict[int, KajModuleValue] | None = None,
+        capability_invoker: Callable[[CapabilityInvocation], CapabilityInvocationResult]
+        | None = None,
+        task_starter: Callable[[StartTaskExpression, tuple[RuntimeValue, ...]], KajTaskHandle]
+        | None = None,
+        task_awaiter: Callable[[KajTaskHandle], tuple[bool, RuntimeValue]] | None = None,
     ) -> None:
         self._resolution = resolution
         self._types = types
         self._output = BufferOutput() if output is None else output
         self._captured_lines: list[str] = []
         self._imported_modules = {} if imported_modules is None else imported_modules
+        self._interaction_responses: dict[str, RuntimeValue] = {}
+        self.inform_events: list[str] = []
+        self._transaction_lines: list[str] | None = None
+        self._capability_invoker = capability_invoker
+        self._capability_responses: dict[str, RuntimeValue] = {}
+        self._task_starter = task_starter
+        self._task_awaiter = task_awaiter
+        self._composition_values: dict[str, RuntimeValue] = {}
 
     def interpret(self, program: Program) -> ExecutionResult:
         self._captured_lines = []
@@ -138,6 +242,7 @@ class Interpreter:
                     statement,
                     (
                         FunctionDeclaration,
+                        TaskDeclaration,
                         RecordDeclaration,
                         EnumDeclaration,
                         NewtypeDeclaration,
@@ -170,12 +275,262 @@ class Interpreter:
                     pass
         return ExecutionResult(None, self._captured_output(), None, tuple(exports))
 
+    def execute_task(
+        self,
+        program: Program,
+        declaration: TaskDeclaration,
+        arguments: tuple[RuntimeValue, ...],
+    ) -> ExecutionResult:
+        """Initialize a module and synchronously execute one host-selected task."""
+        context, error = self.prepare_task(program, declaration, arguments)
+        if error is not None:
+            return ExecutionResult(None, self._captured_output(), error)
+        if context is None:
+            raise RuntimeError("task preparation omitted context without an error")
+        while True:
+            outcome = self.execute_task_next(context)
+            if outcome.runtime_error is not None:
+                return ExecutionResult(None, self._captured_output(), outcome.runtime_error)
+            if outcome.returned:
+                return ExecutionResult(outcome.value, self._captured_output(), None)
+
+    def prepare_task(
+        self,
+        program: Program,
+        declaration: TaskDeclaration,
+        arguments: tuple[RuntimeValue, ...],
+    ) -> tuple[TaskExecutionContext | None, RuntimeErrorInfo | None]:
+        self._captured_lines = []
+        builtin_environment = Environment()
+        module_environment = Environment(builtin_environment)
+        try:
+            self._install_builtins(builtin_environment)
+            for statement in program.statements:
+                if isinstance(statement, ImportDeclaration):
+                    symbol = self._resolution.symbol_for_declaration(statement)
+                    value = self._imported_modules.get(id(statement))
+                    if symbol is not None and value is not None:
+                        module_environment.define(symbol, value, mutable=False)
+            self._install_functions(program, module_environment)
+            for statement in program.statements:
+                if not isinstance(
+                    statement,
+                    (
+                        FunctionDeclaration,
+                        TaskDeclaration,
+                        RecordDeclaration,
+                        EnumDeclaration,
+                        NewtypeDeclaration,
+                        ImportDeclaration,
+                    ),
+                ):
+                    self._execute_statement(statement, module_environment)
+
+            symbol = self._resolution.symbol_for_declaration(declaration)
+            signature = None if symbol is None else self._types.type_of_symbol(symbol)
+            if not isinstance(signature, TaskType):
+                self._fail("RUNTIME_INTERNAL_ERROR", "Task has no signature.", declaration.span)
+            task_environment = Environment(module_environment)
+            for parameter, descriptor, argument_value in zip(
+                declaration.parameters, signature.parameters, arguments, strict=True
+            ):
+                parameter_symbol = self._resolution.symbol_for_declaration(parameter)
+                if parameter_symbol is None:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR", "Task parameter has no symbol.", parameter.span
+                    )
+                task_environment.define(
+                    parameter_symbol, argument_value, mutable=descriptor.mutable
+                )
+            executable_statements: list[Statement] = []
+            normal_execution_started = False
+            for statement in declaration.body.statements:
+                if isinstance(
+                    statement, (GoalClause, RequireClause, InvariantClause, SuccessClause)
+                ):
+                    continue
+                if (
+                    not normal_execution_started
+                    and isinstance(statement, BindingDeclaration)
+                    and not isinstance(statement.initializer, HumanInteractionExpression)
+                ):
+                    self._execute_statement(statement, task_environment)
+                    continue
+                normal_execution_started = True
+                executable_statements.append(statement)
+            return (
+                TaskExecutionContext(
+                    declaration,
+                    signature,
+                    task_environment,
+                    tuple(executable_statements),
+                ),
+                None,
+            )
+        except RuntimeFailure as failure:
+            return None, failure.error
+        except (KeyError, PermissionError, TypeError, ValueError, ArithmeticError) as error:
+            return None, RuntimeErrorInfo(
+                "RUNTIME_INTERNAL_ERROR",
+                f"Invalid interpreter state: {error}",
+                declaration.span,
+            )
+
+    def execute_task_next(self, context: TaskExecutionContext) -> TaskExecutionOutcome:
+        statements = context.statements
+        if context.next_statement >= len(statements):
+            return TaskExecutionOutcome(None, True, None, None)
+        statement = statements[context.next_statement]
+        context.next_statement += 1
+        environment_snapshot = context.environment.snapshot()
+        inform_count = len(self.inform_events)
+        self._transaction_lines = []
+        try:
+            self._execute_statement(statement, context.environment)
+            self._commit_transaction()
+            return TaskExecutionOutcome(statement, False, None, None)
+        except _ReturnSignal as returned:
+            self._commit_transaction()
+            try:
+                result_value = self._coerce(
+                    returned.value,
+                    returned.source_type,
+                    context.signature.return_type,
+                    context.declaration.span,
+                )
+            except RuntimeFailure as failure:
+                return TaskExecutionOutcome(statement, False, None, failure.error)
+            return TaskExecutionOutcome(statement, True, result_value, None)
+        except RuntimeFailure as failure:
+            self._commit_transaction()
+            return TaskExecutionOutcome(statement, False, None, failure.error)
+        except _HumanInteractionSignal as signal:
+            context.next_statement -= 1
+            Environment.restore(environment_snapshot)
+            del self.inform_events[inform_count:]
+            self._transaction_lines = None
+            return TaskExecutionOutcome(statement, False, None, None, signal.request)
+        except _CapabilitySignal as signal:
+            context.next_statement -= 1
+            Environment.restore(environment_snapshot)
+            del self.inform_events[inform_count:]
+            self._transaction_lines = None
+            return TaskExecutionOutcome(
+                statement,
+                False,
+                None,
+                None,
+                capability=signal.suspension,
+            )
+        except _TaskAwaitSignal as signal:
+            context.next_statement -= 1
+            Environment.restore(environment_snapshot)
+            del self.inform_events[inform_count:]
+            self._transaction_lines = None
+            return TaskExecutionOutcome(statement, False, None, None, task_await=signal.suspension)
+        except (KeyError, PermissionError, TypeError, ValueError, ArithmeticError) as error:
+            self._commit_transaction()
+            return TaskExecutionOutcome(
+                statement,
+                False,
+                None,
+                RuntimeErrorInfo(
+                    "RUNTIME_INTERNAL_ERROR",
+                    f"Invalid interpreter state: {error}",
+                    statement.span,
+                ),
+            )
+
+    def supply_interaction_response(
+        self, expression: HumanInteractionExpression, value: RuntimeValue
+    ) -> None:
+        self._interaction_responses[self.interaction_key(expression)] = value
+
+    @staticmethod
+    def interaction_key(expression: HumanInteractionExpression) -> str:
+        span = expression.span
+        return f"{span.start.offset}:{span.end.offset}:{expression.kind}"
+
+    def interaction_responses(self) -> tuple[tuple[str, RuntimeValue], ...]:
+        return tuple(sorted(self._interaction_responses.items()))
+
+    def restore_interaction_responses(
+        self, responses: tuple[tuple[str, RuntimeValue], ...]
+    ) -> None:
+        self._interaction_responses = dict(responses)
+
+    @staticmethod
+    def capability_key(expression: CallExpression) -> str:
+        span = expression.span
+        return f"{span.start.offset}:{span.end.offset}:capability"
+
+    def supply_capability_response(self, expression: CallExpression, value: RuntimeValue) -> None:
+        self._capability_responses[self.capability_key(expression)] = value
+
+    def capability_responses(self) -> tuple[tuple[str, RuntimeValue], ...]:
+        return tuple(sorted(self._capability_responses.items()))
+
+    def restore_capability_responses(self, responses: tuple[tuple[str, RuntimeValue], ...]) -> None:
+        self._capability_responses = dict(responses)
+
+    @staticmethod
+    def composition_key(expression: Expression) -> str:
+        return f"{expression.span.start.offset}:{expression.span.end.offset}:composition"
+
+    def composition_values(self) -> tuple[tuple[str, RuntimeValue], ...]:
+        return tuple(sorted(self._composition_values.items()))
+
+    def restore_composition_values(self, values: tuple[tuple[str, RuntimeValue], ...]) -> None:
+        self._composition_values = dict(values)
+
+    def evaluate_contract(
+        self,
+        context: TaskExecutionContext,
+        expression: Expression,
+        *,
+        parameter: SuccessParameter | None = None,
+        value: RuntimeValue = None,
+    ) -> tuple[RuntimeValue, RuntimeErrorInfo | None]:
+        environment = context.environment
+        try:
+            if parameter is not None:
+                environment = Environment(environment)
+                symbol = self._resolution.symbol_for_declaration(parameter)
+                if symbol is None:
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR",
+                        "Success parameter has no symbol.",
+                        parameter.span,
+                    )
+                environment.define(symbol, value, mutable=False)
+            return self._evaluate(expression, environment), None
+        except RuntimeFailure as failure:
+            return None, failure.error
+        except (KeyError, PermissionError, TypeError, ValueError, ArithmeticError) as error:
+            return None, RuntimeErrorInfo(
+                "RUNTIME_INTERNAL_ERROR",
+                f"Invalid contract evaluation state: {error}",
+                expression.span,
+            )
+
     def _captured_output(self) -> str:
         return "".join(line + "\n" for line in self._captured_lines)
 
     def _emit(self, text: str) -> None:
+        if self._transaction_lines is not None:
+            self._transaction_lines.append(text)
+            return
         self._captured_lines.append(text)
         self._output.write_line(text)
+
+    def _commit_transaction(self) -> None:
+        lines = self._transaction_lines
+        self._transaction_lines = None
+        if lines is None:
+            return
+        for line in lines:
+            self._captured_lines.append(line)
+            self._output.write_line(line)
 
     def _install_builtins(self, environment: Environment) -> None:
         builtins = {
@@ -263,8 +618,7 @@ class Interpreter:
                 elements = range(iterable.start, iterable.end)
             elif isinstance(iterable, KajMap):
                 elements = tuple(
-                    KajMapEntry(self._map_key_value(key), value)
-                    for key, value in iterable.entries
+                    KajMapEntry(self._map_key_value(key), value) for key, value in iterable.entries
                 )
             else:
                 self._fail(
@@ -334,14 +688,25 @@ class Interpreter:
                 self._execute_statement(selected.body, branch_environment)
         elif isinstance(statement, Block):
             self._execute_block(statement, Environment(environment))
+        elif isinstance(statement, StepStatement):
+            self._execute_block(statement.body, Environment(environment))
+        elif isinstance(statement, PlanRegion):
+            self._execute_block(statement.body, environment)
         elif isinstance(
             statement,
             (
+                GoalClause,
+                RequireClause,
+                InvariantClause,
+                SuccessClause,
                 FunctionDeclaration,
+                TaskDeclaration,
                 RecordDeclaration,
                 EnumDeclaration,
                 NewtypeDeclaration,
                 ImportDeclaration,
+                CapabilityDeclaration,
+                UseCapabilityDeclaration,
             ),
         ):
             return
@@ -439,7 +804,44 @@ class Interpreter:
         if isinstance(expression, BinaryExpression):
             return self._evaluate_binary(expression, environment)
         if isinstance(expression, CallExpression):
+            if self._is_capability_call(expression):
+                return self._capability_call(expression, environment)
             return self._evaluate_call(expression, environment)
+        if isinstance(expression, HumanInteractionExpression):
+            return self._evaluate_human_interaction(expression, environment)
+        if isinstance(expression, StartTaskExpression):
+            composition_cache_key = self.composition_key(expression)
+            cached = self._composition_values.get(composition_cache_key)
+            if isinstance(cached, KajTaskHandle):
+                return cached
+            if self._task_starter is None:
+                self._fail(
+                    "TASK_COMPOSITION_RUNTIME_UNAVAILABLE",
+                    "No task scheduler is available.",
+                    expression.span,
+                )
+            arguments = tuple(
+                self._evaluate(argument.value, environment) for argument in expression.arguments
+            )
+            handle = self._task_starter(expression, arguments)
+            self._composition_values[composition_cache_key] = handle
+            return handle
+        if isinstance(expression, AwaitTaskExpression):
+            composition_cache_key = self.composition_key(expression)
+            if composition_cache_key in self._composition_values:
+                return self._composition_values[composition_cache_key]
+            awaited_handle = self._evaluate(expression.operand, environment)
+            if not isinstance(awaited_handle, KajTaskHandle) or self._task_awaiter is None:
+                self._fail(
+                    "TASK_AWAIT_EXPECTED_HANDLE",
+                    "await requires a task handle.",
+                    expression.span,
+                )
+            ready, value = self._task_awaiter(awaited_handle)
+            if not ready:
+                raise _TaskAwaitSignal(TaskAwaitSuspension(expression, awaited_handle))
+            self._composition_values[composition_cache_key] = value
+            return value
         if isinstance(expression, RecordConstructionExpression):
             record_type = self._expression_type(expression)
             if not isinstance(record_type, RecordType):
@@ -590,7 +992,9 @@ class Interpreter:
             if isinstance(object_value, KajList) and expression.member in {"first", "last"}:
                 edge_type = self._expression_type(expression)
                 if not isinstance(edge_type, OptionalType):
-                    self._fail("RUNTIME_INTERNAL_ERROR", "List edge has invalid type.", expression.span)
+                    self._fail(
+                        "RUNTIME_INTERNAL_ERROR", "List edge has invalid type.", expression.span
+                    )
                 if not object_value.elements:
                     return KajEnumValue(edge_type, "none", ())
                 index = 0 if expression.member == "first" else -1
@@ -742,6 +1146,123 @@ class Interpreter:
             )
         self._fail("RUNTIME_INVALID_OPERATION", "Unknown binary operator.", span)
 
+    def _evaluate_human_interaction(
+        self, expression: HumanInteractionExpression, environment: Environment
+    ) -> RuntimeValue:
+        cached = self._interaction_responses.get(
+            self.interaction_key(expression), _NO_INTERACTION_RESPONSE
+        )
+        if cached is not _NO_INTERACTION_RESPONSE:
+            return cast(RuntimeValue, cached)
+        values = [self._evaluate(argument.value, environment) for argument in expression.arguments]
+        if not values or not isinstance(values[0], str):
+            self._fail(
+                "RUNTIME_INTERNAL_ERROR",
+                "Human interaction prompt is not String.",
+                expression.span,
+            )
+        prompt = values[0]
+        if expression.kind == "inform":
+            self.inform_events.append(prompt)
+            return None
+        expected_type = self._expression_type(expression)
+        if not isinstance(
+            expected_type,
+            (
+                PrimitiveType,
+                ListType,
+                MapType,
+                RecordType,
+                EnumType,
+                NewtypeType,
+                OptionalType,
+                ResultType,
+            ),
+        ):
+            self._fail(
+                "RUNTIME_INTERNAL_ERROR",
+                "Human interaction has no value type.",
+                expression.span,
+            )
+        options: tuple[RuntimeValue, ...] = ()
+        if expression.kind == "choose":
+            if len(values) != 2 or not isinstance(values[1], KajList):
+                self._fail(
+                    "TASK_CHOOSE_OPTIONS_INVALID",
+                    "choose options must be a non-empty List.",
+                    expression.span,
+                )
+            options = values[1].elements
+            if not options:
+                self._fail(
+                    "TASK_CHOOSE_EMPTY_OPTIONS",
+                    "choose options must not be empty.",
+                    expression.span,
+                )
+        raise _HumanInteractionSignal(
+            InteractionRequest(expression, prompt, expected_type, options)
+        )
+
+    def _capability_call(
+        self, expression: CallExpression, environment: Environment
+    ) -> RuntimeValue:
+        callee = expression.callee
+        if not isinstance(callee, MemberAccessExpression) or not isinstance(
+            callee.object, Identifier
+        ):
+            raise TypeError("capability call shape changed after detection")
+        symbol = self._resolution.symbol_for(callee.object)
+        if symbol is None or symbol.kind is not SymbolKind.CAPABILITY_ALIAS:
+            raise RuntimeError("capability alias changed after detection")
+        key = self.capability_key(expression)
+        cached = self._capability_responses.get(key, _NO_INTERACTION_RESPONSE)
+        if cached is not _NO_INTERACTION_RESPONSE:
+            return cast(RuntimeValue, cached)
+        expected = self._expression_type(expression)
+        if not isinstance(
+            expected,
+            (
+                PrimitiveType,
+                ListType,
+                MapType,
+                RecordType,
+                EnumType,
+                NewtypeType,
+                OptionalType,
+                ResultType,
+            ),
+        ):
+            self._fail(
+                "RUNTIME_INTERNAL_ERROR",
+                "Capability call has no value return type.",
+                expression.span,
+            )
+        arguments = tuple(
+            self._evaluate(argument.value, environment) for argument in expression.arguments
+        )
+        if self._capability_invoker is None:
+            self._fail(
+                "CAPABILITY_NOT_PROVIDED",
+                f"Capability alias '{callee.object.name}' is not bound.",
+                expression.span,
+            )
+        invocation = CapabilityInvocation(
+            expression, callee.object.name, callee.member, arguments, expected
+        )
+        result = self._capability_invoker(invocation)
+        if result.pending:
+            raise _CapabilitySignal(CapabilitySuspension(invocation, result))
+        return result.value
+
+    def _is_capability_call(self, expression: CallExpression) -> bool:
+        callee = expression.callee
+        if not isinstance(callee, MemberAccessExpression) or not isinstance(
+            callee.object, Identifier
+        ):
+            return False
+        symbol = self._resolution.symbol_for(callee.object)
+        return symbol is not None and symbol.kind is SymbolKind.CAPABILITY_ALIAS
+
     def _evaluate_call(self, expression: CallExpression, environment: Environment) -> RuntimeValue:
         expression_type = self._expression_type(expression)
         if isinstance(expression_type, NewtypeType):
@@ -786,22 +1307,32 @@ class Interpreter:
             return None
         if callee is BuiltinFunction.RANGE:
             if len(values) != 2 or any(type(value) is not int for value in values):
-                self._fail("RUNTIME_INTERNAL_ERROR", "range received invalid arguments.", expression.span)
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "range received invalid arguments.", expression.span
+                )
             return KajRange(cast(int, values[0]), cast(int, values[1]))
         if callee is BuiltinFunction.STRING:
             if len(values) != 1:
-                self._fail("RUNTIME_INTERNAL_ERROR", "String received invalid arity.", expression.span)
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "String received invalid arity.", expression.span
+                )
             return self._format_value(values[0])
         if callee is BuiltinFunction.UTF8_ENCODE:
             if len(values) != 1 or not isinstance(values[0], str):
-                self._fail("RUNTIME_INTERNAL_ERROR", "utf8_encode received invalid input.", expression.span)
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "utf8_encode received invalid input.", expression.span
+                )
             return values[0].encode("utf-8")
         if callee is BuiltinFunction.UTF8_DECODE:
             if len(values) != 1 or not isinstance(values[0], bytes):
-                self._fail("RUNTIME_INTERNAL_ERROR", "utf8_decode received invalid input.", expression.span)
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "utf8_decode received invalid input.", expression.span
+                )
             result_type = self._expression_type(expression)
             if not isinstance(result_type, ResultType):
-                self._fail("RUNTIME_INTERNAL_ERROR", "utf8_decode has invalid type.", expression.span)
+                self._fail(
+                    "RUNTIME_INTERNAL_ERROR", "utf8_decode has invalid type.", expression.span
+                )
             return decode_utf8(values[0], result_type)
         if not isinstance(callee, KajFunction):
             self._fail("RUNTIME_INVALID_OPERATION", "Value is not callable.", expression.span)
@@ -983,10 +1514,14 @@ class Interpreter:
         if isinstance(value, KajList):
             return "[" + ", ".join(self._format_nested(item) for item in value.elements) + "]"
         if isinstance(value, KajMap):
-            return "{" + ", ".join(
-                f"{self._format_nested(self._map_key_value(key))}: {self._format_nested(item)}"
-                for key, item in value.entries
-            ) + "}"
+            return (
+                "{"
+                + ", ".join(
+                    f"{self._format_nested(self._map_key_value(key))}: {self._format_nested(item)}"
+                    for key, item in value.entries
+                )
+                + "}"
+            )
         if isinstance(value, KajEnumValue):
             if isinstance(value.type, (OptionalType, ResultType)):
                 name = value.variant
@@ -1040,9 +1575,12 @@ class Interpreter:
 
     def _kaj_equal(self, left: RuntimeValue, right: RuntimeValue) -> bool:
         if type(left) is not type(right):
-            if isinstance(left, (int, Decimal)) and not isinstance(left, bool) and isinstance(
-                right, (int, Decimal)
-            ) and not isinstance(right, bool):
+            if (
+                isinstance(left, (int, Decimal))
+                and not isinstance(left, bool)
+                and isinstance(right, (int, Decimal))
+                and not isinstance(right, bool)
+            ):
                 return Decimal(left) == Decimal(right)
             return False
         if isinstance(left, KajEnumValue) and isinstance(right, KajEnumValue):
@@ -1050,7 +1588,9 @@ class Interpreter:
                 left.type == right.type
                 and left.variant == right.variant
                 and len(left.payload) == len(right.payload)
-                and all(self._kaj_equal(a, b) for a, b in zip(left.payload, right.payload, strict=True))
+                and all(
+                    self._kaj_equal(a, b) for a, b in zip(left.payload, right.payload, strict=True)
+                )
             )
         if isinstance(left, KajNewtypeValue) and isinstance(right, KajNewtypeValue):
             return left.type == right.type and self._kaj_equal(left.value, right.value)

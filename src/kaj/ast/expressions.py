@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from kaj.ast.base import BinaryOperator, Expression, Node, UnaryOperator
+from kaj.ast.base import BinaryOperator, Expression, Node, TypeExpression, UnaryOperator
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,24 @@ class CallArgument(Node):
 class CallExpression(Expression):
     callee: Expression
     arguments: tuple[CallArgument, ...]
+
+
+@dataclass(frozen=True)
+class HumanInteractionExpression(Expression):
+    kind: str
+    type_argument: TypeExpression | None
+    arguments: tuple[CallArgument, ...]
+
+
+@dataclass(frozen=True)
+class StartTaskExpression(Expression):
+    task_name: str
+    arguments: tuple[CallArgument, ...]
+
+
+@dataclass(frozen=True)
+class AwaitTaskExpression(Expression):
+    operand: Expression
 
 
 @dataclass(frozen=True)

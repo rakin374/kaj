@@ -1,7 +1,23 @@
-let age = 20
+fn add(a: Int, b: Int) -> Int {
+    return a + b
+}
 
-if age >= 18 {
-    print("adult")
-} else {
-    print("minor")
+var i = 0
+
+while i < 5 {
+    print(i)
+    i = i + 1
+}
+
+
+let values = [10, 20, 30, 40]
+
+for value in values {
+    print(value)
+}
+
+let numbers = [1, 2, 3, 4, 5]
+
+for number in numbers {
+    print(number)
 }

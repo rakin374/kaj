@@ -1,0 +1,10 @@
+task Ordered() -> Int {
+    var value = 0
+    step first {
+        value = 1
+    }
+    step second {
+        value = value + 1
+    }
+    return value
+}

@@ -1,0 +1,6 @@
+task Planned() -> Int {
+    goal "Produce a validated plan"
+    plan {
+    }
+    return 42
+}

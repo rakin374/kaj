@@ -3035,3 +3035,48 @@ metadata, or runtime wrapper.
 Checkpoint 17 adds `import_declaration` with a non-empty ordered `path` array of identifier
 segments. The syntax node contains no resolved filesystem path, loaded module AST, dependency
 graph, semantic namespace, or runtime environment.
+
+---
+
+# 77. Agentic Checkpoint 1 Task Declaration
+
+Agentic Checkpoint 1 adds the syntax-only `task_declaration` statement kind. It contains `name`,
+an ordered `parameters` array, an explicit `return_type`, and a `body` block, following the same
+field conventions as `function_declaration`.
+
+Task runtime identity and lifecycle state are deliberately excluded. In particular, `TaskId`,
+`created`, `running`, `completed`, `failed`, results, and runtime failures never appear in AST JSON.
+
+---
+
+# 78. Agentic Checkpoint 2 Step Statement
+
+Agentic Checkpoint 2 adds the syntax-only `step_statement` kind. It contains a required `name` and
+a `body` block. The node preserves its ordinary source span and source order within a task body.
+
+Step execution states and task control state are runtime-only. `pending`, `running`, `completed`,
+`failed`, pause requests, cancellation requests, and continuation positions are never serialized
+into AST JSON.
+
+---
+
+# 79. Agentic Checkpoint 3 Task Contract Nodes
+
+Agentic Checkpoint 3 adds `goal_clause`, `require_clause`, `invariant_clause`, `success_clause`,
+and `success_parameter`. Goal stores one expression. Requirement and invariant nodes each store one
+condition expression. Success stores an optional success-parameter node and one condition.
+
+Only source structure and spans are serialized. Evaluated goal text, pass/fail outcomes, contract
+failure categories, underlying runtime errors, and lifecycle transitions are runtime data and do
+not appear in AST JSON.
+
+---
+
+# 80. Agentic Checkpoint 4 Human Interaction Expression
+
+Agentic Checkpoint 4 adds `human_interaction_expression`. It stores the interaction kind, an
+optional source type argument, and ordered call arguments. This represents `ask`, `choose`,
+`confirm`, `inform`, and `handoff` syntax.
+
+Interaction IDs, prompts after evaluation, response values, statuses, pending requests, and task
+continuation state are runtime-only and never appear in AST JSON.

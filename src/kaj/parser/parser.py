@@ -8,6 +8,7 @@ from typing import Never, cast
 from kaj.ast import (
     AssignmentOperator,
     AssignmentStatement,
+    AwaitTaskExpression,
     BinaryExpression,
     BinaryOperator,
     BindingDeclaration,
@@ -17,6 +18,8 @@ from kaj.ast import (
     BreakStatement,
     CallArgument,
     CallExpression,
+    CapabilityDeclaration,
+    CapabilityOperationSignature,
     ContinueStatement,
     DecimalLiteral,
     EnumConstructionExpression,
@@ -30,12 +33,15 @@ from kaj.ast import (
     ForStatement,
     FunctionDeclaration,
     GenericType,
+    GoalClause,
+    HumanInteractionExpression,
     Identifier,
     IfStatement,
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     InterpolatedString,
+    InvariantClause,
     ListLiteral,
     MapEntry,
     MapLiteral,
@@ -48,17 +54,25 @@ from kaj.ast import (
     NoneLiteral,
     Parameter,
     PatternBinding,
+    PlanRegion,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
     RecordFieldDeclaration,
     RecordFieldInitializer,
+    RequireClause,
     ReturnStatement,
+    StartTaskExpression,
     Statement,
+    StepStatement,
     StringLiteral,
+    SuccessClause,
+    SuccessParameter,
+    TaskDeclaration,
     TypeExpression,
     UnaryExpression,
     UnaryOperator,
+    UseCapabilityDeclaration,
     WhileStatement,
 )
 from kaj.diagnostics import Diagnostic
@@ -110,6 +124,15 @@ STATEMENT_STARTS = {
     TokenKind.LET,
     TokenKind.VAR,
     TokenKind.FN,
+    TokenKind.TASK,
+    TokenKind.CAPABILITY,
+    TokenKind.USE,
+    TokenKind.PLAN,
+    TokenKind.STEP,
+    TokenKind.GOAL,
+    TokenKind.REQUIRE,
+    TokenKind.INVARIANT,
+    TokenKind.SUCCESS,
     TokenKind.TYPE,
     TokenKind.ENUM,
     TokenKind.NEWTYPE,
@@ -147,15 +170,19 @@ class Parser:
         self._index = 0
         self._diagnostics: list[Diagnostic] = []
         self._parsing_control_condition = False
+        self._task_depth = 0
 
     def parse(self) -> ParserResult:
         self._index = 0
         self._diagnostics.clear()
         self._parsing_control_condition = False
+        self._task_depth = 0
         statements: list[Statement] = []
 
         while not self._check(TokenKind.EOF):
-            statement = self._parse_statement_recovering(in_block=False)
+            statement = self._parse_statement_recovering(
+                in_block=False, allow_step=False, allow_contract=False
+            )
             if statement is not None:
                 statements.append(statement)
 
@@ -169,9 +196,94 @@ class Parser:
             diagnostics=tuple(self._diagnostics),
         )
 
-    def _parse_statement_recovering(self, *, in_block: bool) -> Statement | None:
+    def _parse_statement_recovering(
+        self, *, in_block: bool, allow_step: bool, allow_contract: bool
+    ) -> Statement | None:
         start_index = self._index
         try:
+            if in_block and self._check(TokenKind.TASK):
+                start = self._advance()
+                declaration = self._parse_task(start)
+                self._diagnostics.append(
+                    Diagnostic(
+                        PARSE_UNEXPECTED_TOKEN,
+                        "Task declarations are only allowed at module scope.",
+                        declaration.span,
+                    )
+                )
+                return None
+            if self._check(TokenKind.STEP):
+                step_statement = self._parse_step(self._advance())
+                if allow_step:
+                    return step_statement
+                code = (
+                    "TASK_INVALID_STEP_PLACEMENT"
+                    if self._task_depth > 0
+                    else "TASK_STEP_OUTSIDE_TASK"
+                )
+                message = (
+                    "Steps must appear directly in a task body."
+                    if self._task_depth > 0
+                    else "Steps may only appear inside a task body."
+                )
+                self._diagnostics.append(Diagnostic(code, message, step_statement.span))
+                return None
+            if self._check(TokenKind.CAPABILITY) and in_block:
+                capability_declaration = self._parse_capability(self._advance())
+                self._diagnostics.append(
+                    Diagnostic(
+                        "CAPABILITY_DECLARATION_OUTSIDE_MODULE",
+                        "Capability declarations are only allowed at module scope.",
+                        capability_declaration.span,
+                    )
+                )
+                return None
+            if self._check_contextual("use"):
+                use_declaration = self._parse_use_capability(self._advance())
+                if allow_step and self._task_depth > 0:
+                    return use_declaration
+                self._diagnostics.append(
+                    Diagnostic(
+                        "CAPABILITY_USE_OUTSIDE_TASK",
+                        "Capability use declarations must appear directly in a task body.",
+                        use_declaration.span,
+                    )
+                )
+                return None
+            if self._check(TokenKind.PLAN):
+                start = self._advance()
+                region = PlanRegion(
+                    SourceSpan(start.span.start, start.span.end),
+                    self._parse_block(allow_steps=True),
+                )
+                region = PlanRegion(SourceSpan(start.span.start, region.body.span.end), region.body)
+                if allow_step and self._task_depth > 0:
+                    return region
+                self._diagnostics.append(
+                    Diagnostic(
+                        "TASK_PLAN_OUTSIDE_TASK",
+                        "Plan regions must appear directly in a task body.",
+                        region.span,
+                    )
+                )
+                return None
+            if self._current().kind in {
+                TokenKind.GOAL,
+                TokenKind.REQUIRE,
+                TokenKind.INVARIANT,
+                TokenKind.SUCCESS,
+            }:
+                clause = self._parse_contract_clause(self._advance())
+                if allow_contract:
+                    return clause
+                self._diagnostics.append(
+                    Diagnostic(
+                        "TASK_CONTRACT_INVALID_PLACEMENT",
+                        "Task contract clauses must appear directly in a task body.",
+                        clause.span,
+                    )
+                )
+                return None
             return self._parse_statement()
         except _ParseError:
             self._synchronize(start_index=start_index, in_block=in_block)
@@ -184,6 +296,16 @@ class Parser:
             return self._parse_binding(self._previous(), BindingKind.VAR)
         if self._match(TokenKind.FN):
             return self._parse_function(self._previous())
+        if self._match(TokenKind.TASK):
+            return self._parse_task(self._previous())
+        if self._match(TokenKind.PLAN):
+            start = self._previous()
+            body = self._parse_block(allow_steps=True)
+            return PlanRegion(SourceSpan(start.span.start, body.span.end), body)
+        if self._match(TokenKind.CAPABILITY):
+            return self._parse_capability(self._previous())
+        if self._check_contextual("use"):
+            return self._parse_use_capability(self._advance())
         if self._match(TokenKind.TYPE):
             return self._parse_record_declaration(self._previous())
         if self._match(TokenKind.ENUM):
@@ -236,11 +358,14 @@ class Parser:
         )
 
     def _parse_function(self, start: Token) -> FunctionDeclaration:
-        name = self._consume(
-            TokenKind.IDENTIFIER,
-            PARSE_EXPECTED_IDENTIFIER,
-            "Expected a function name.",
-        )
+        if self._check(TokenKind.IDENTIFIER) or self._check(TokenKind.CHOOSE):
+            name = self._advance()
+        else:
+            self._raise(
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected a function name.",
+                self._current().span,
+            )
         self._consume(
             TokenKind.LEFT_PAREN,
             PARSE_EXPECTED_TOKEN,
@@ -265,6 +390,166 @@ class Parser:
         return_type = self._parse_type_expression()
         body = self._parse_block()
         return FunctionDeclaration(
+            span=SourceSpan(start.span.start, body.span.end),
+            name=name.lexeme,
+            parameters=tuple(parameters),
+            return_type=return_type,
+            body=body,
+        )
+
+    def _parse_step(self, start: Token) -> StepStatement:
+        name = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a step name.",
+        )
+        body = self._parse_block()
+        return StepStatement(
+            span=SourceSpan(start.span.start, body.span.end),
+            name=name.lexeme,
+            body=body,
+        )
+
+    def _parse_capability(self, start: Token) -> CapabilityDeclaration:
+        name = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a capability name.",
+        )
+        self._consume(TokenKind.LEFT_BRACE, PARSE_EXPECTED_TOKEN, "Expected '{'.")
+        operations: list[CapabilityOperationSignature] = []
+        while not self._check(TokenKind.RIGHT_BRACE) and not self._check(TokenKind.EOF):
+            operation_start = self._consume(
+                TokenKind.FN, PARSE_EXPECTED_TOKEN, "Expected 'fn' operation signature."
+            )
+            operation_name = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected an operation name.",
+            )
+            self._consume(TokenKind.LEFT_PAREN, PARSE_EXPECTED_TOKEN, "Expected '('.")
+            parameters: list[Parameter] = []
+            if not self._check(TokenKind.RIGHT_PAREN):
+                while True:
+                    parameters.append(self._parse_parameter())
+                    if not self._match(TokenKind.COMMA):
+                        break
+            self._consume(TokenKind.RIGHT_PAREN, PARSE_EXPECTED_TOKEN, "Expected ')'.")
+            self._consume(TokenKind.ARROW, PARSE_EXPECTED_TOKEN, "Expected '->'.")
+            return_type = self._parse_type_expression()
+            if self._check(TokenKind.LEFT_BRACE):
+                body = self._parse_block()
+                self._diagnostics.append(
+                    Diagnostic(
+                        "CAPABILITY_OPERATION_BODY_NOT_ALLOWED",
+                        "Capability operations are signatures only.",
+                        body.span,
+                    )
+                )
+            operations.append(
+                CapabilityOperationSignature(
+                    SourceSpan(operation_start.span.start, return_type.span.end),
+                    operation_name.lexeme,
+                    tuple(parameters),
+                    return_type,
+                )
+            )
+        close = self._consume(TokenKind.RIGHT_BRACE, PARSE_EXPECTED_TOKEN, "Expected '}'.")
+        return CapabilityDeclaration(
+            SourceSpan(start.span.start, close.span.end), name.lexeme, tuple(operations)
+        )
+
+    def _parse_use_capability(self, start: Token) -> UseCapabilityDeclaration:
+        capability = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a capability type name.",
+        )
+        self._consume(TokenKind.AS, PARSE_EXPECTED_TOKEN, "Expected 'as'.")
+        alias = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a capability alias.",
+        )
+        return UseCapabilityDeclaration(
+            SourceSpan(start.span.start, alias.span.end), capability.lexeme, alias.lexeme
+        )
+
+    def _parse_contract_clause(
+        self, start: Token
+    ) -> GoalClause | RequireClause | InvariantClause | SuccessClause:
+        if start.kind is TokenKind.GOAL:
+            expression = self._parse_expression()
+            return GoalClause(SourceSpan(start.span.start, expression.span.end), expression)
+        if start.kind in {TokenKind.REQUIRE, TokenKind.INVARIANT}:
+            condition, end = self._parse_contract_condition()
+            clause_type = RequireClause if start.kind is TokenKind.REQUIRE else InvariantClause
+            return clause_type(SourceSpan(start.span.start, end), condition)
+
+        parameter: SuccessParameter | None = None
+        if self._match(TokenKind.LEFT_PAREN):
+            name = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected a success parameter name.",
+            )
+            self._consume(
+                TokenKind.COLON,
+                PARSE_EXPECTED_TOKEN,
+                "Expected ':' after success parameter name.",
+            )
+            annotation = self._parse_type_expression()
+            parameter = SuccessParameter(
+                SourceSpan(name.span.start, annotation.span.end),
+                name.lexeme,
+                annotation,
+            )
+            self._consume(
+                TokenKind.RIGHT_PAREN,
+                PARSE_EXPECTED_TOKEN,
+                "Expected ')' after success parameter.",
+            )
+        condition, end = self._parse_contract_condition()
+        return SuccessClause(SourceSpan(start.span.start, end), parameter, condition)
+
+    def _parse_contract_condition(self) -> tuple[Expression, SourceLocation]:
+        self._consume(
+            TokenKind.LEFT_BRACE,
+            PARSE_EXPECTED_TOKEN,
+            "Expected '{' before contract condition.",
+        )
+        condition = self._parse_expression()
+        close = self._consume(
+            TokenKind.RIGHT_BRACE,
+            PARSE_EXPECTED_TOKEN,
+            "Expected '}' after contract condition.",
+        )
+        return condition, close.span.end
+
+    def _parse_task(self, start: Token) -> TaskDeclaration:
+        name = self._consume(
+            TokenKind.IDENTIFIER,
+            PARSE_EXPECTED_IDENTIFIER,
+            "Expected a task name.",
+        )
+        self._consume(TokenKind.LEFT_PAREN, PARSE_EXPECTED_TOKEN, "Expected '(' after task name.")
+        parameters: list[Parameter] = []
+        if not self._check(TokenKind.RIGHT_PAREN):
+            while True:
+                parameters.append(self._parse_parameter())
+                if not self._match(TokenKind.COMMA):
+                    break
+        self._consume(TokenKind.RIGHT_PAREN, PARSE_EXPECTED_TOKEN, "Expected ')' after parameters.")
+        self._consume(
+            TokenKind.ARROW, PARSE_EXPECTED_TOKEN, "Expected '->' before task return type."
+        )
+        return_type = self._parse_type_expression()
+        self._task_depth += 1
+        try:
+            body = self._parse_block(allow_steps=True, allow_contracts=True)
+        finally:
+            self._task_depth -= 1
+        return TaskDeclaration(
             span=SourceSpan(start.span.start, body.span.end),
             name=name.lexeme,
             parameters=tuple(parameters),
@@ -563,7 +848,7 @@ class Parser:
             value=value,
         )
 
-    def _parse_block(self) -> Block:
+    def _parse_block(self, *, allow_steps: bool = False, allow_contracts: bool = False) -> Block:
         start = self._consume(
             TokenKind.LEFT_BRACE,
             PARSE_EXPECTED_TOKEN,
@@ -571,7 +856,11 @@ class Parser:
         )
         statements: list[Statement] = []
         while not self._check(TokenKind.RIGHT_BRACE) and not self._check(TokenKind.EOF):
-            statement = self._parse_statement_recovering(in_block=True)
+            statement = self._parse_statement_recovering(
+                in_block=True,
+                allow_step=allow_steps,
+                allow_contract=allow_contracts,
+            )
             if statement is not None:
                 statements.append(statement)
         end = self._consume(
@@ -661,6 +950,26 @@ class Parser:
         return expression
 
     def _parse_unary(self) -> Expression:
+        if self._match(TokenKind.START):
+            start = self._previous()
+            name = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected a task name after 'start'.",
+            )
+            self._consume(TokenKind.LEFT_PAREN, PARSE_EXPECTED_TOKEN, "Expected '('.")
+            call_expression = self._finish_call(Identifier(name.span, name.lexeme))
+            if not isinstance(call_expression, CallExpression):
+                raise TypeError("start call did not produce a call expression")
+            return StartTaskExpression(
+                SourceSpan(start.span.start, call_expression.span.end),
+                name.lexeme,
+                call_expression.arguments,
+            )
+        if self._match(TokenKind.AWAIT):
+            start = self._previous()
+            operand = self._parse_unary()
+            return AwaitTaskExpression(SourceSpan(start.span.start, operand.span.end), operand)
         operator = UNARY_OPERATORS.get(self._current().kind)
         if operator is None:
             return self._parse_power()
@@ -696,10 +1005,7 @@ class Parser:
                     "Expected member name after '.'.",
                 )
                 qualified_name = self._qualified_expression_name(expression)
-                if (
-                    qualified_name is not None
-                    and qualified_name.rsplit(".", 1)[-1][:1].isupper()
-                ):
+                if qualified_name is not None and qualified_name.rsplit(".", 1)[-1][:1].isupper():
                     expression = EnumConstructionExpression(
                         span=SourceSpan(expression.span.start, member.span.end),
                         type_name=qualified_name,
@@ -802,6 +1108,11 @@ class Parser:
             TokenKind.FALSE,
             TokenKind.NONE,
             TokenKind.IDENTIFIER,
+            TokenKind.ASK,
+            TokenKind.CHOOSE,
+            TokenKind.CONFIRM,
+            TokenKind.INFORM,
+            TokenKind.HANDOFF,
             TokenKind.LEFT_PAREN,
             TokenKind.LEFT_BRACKET,
             TokenKind.LEFT_BRACE,
@@ -813,6 +1124,42 @@ class Parser:
                 token.span,
             )
         self._advance()
+        if token.kind in {TokenKind.ASK, TokenKind.CHOOSE} and not self._check(TokenKind.LESS):
+            return Identifier(span=token.span, name=token.lexeme)
+        if token.kind in {
+            TokenKind.ASK,
+            TokenKind.CHOOSE,
+            TokenKind.CONFIRM,
+            TokenKind.INFORM,
+            TokenKind.HANDOFF,
+        }:
+            type_argument: TypeExpression | None = None
+            if token.kind in {TokenKind.ASK, TokenKind.CHOOSE}:
+                self._consume(
+                    TokenKind.LESS,
+                    PARSE_EXPECTED_TOKEN,
+                    f"Expected '<' after {token.lexeme}.",
+                )
+                type_argument = self._parse_type_expression()
+                self._consume(
+                    TokenKind.GREATER,
+                    PARSE_EXPECTED_TOKEN,
+                    "Expected '>' after interaction type.",
+                )
+            self._consume(
+                TokenKind.LEFT_PAREN,
+                PARSE_EXPECTED_TOKEN,
+                f"Expected '(' after {token.lexeme}.",
+            )
+            call = self._finish_call(Identifier(token.span, token.lexeme))
+            if not isinstance(call, CallExpression):
+                raise AssertionError("human interaction call parsed as non-call")
+            return HumanInteractionExpression(
+                SourceSpan(token.span.start, call.span.end),
+                token.lexeme,
+                type_argument,
+                call.arguments,
+            )
         if token.kind is TokenKind.INTEGER:
             return IntegerLiteral(span=token.span, value=cast(int, token.value))
         if token.kind is TokenKind.DECIMAL:
@@ -1089,6 +1436,16 @@ class Parser:
     def _check(self, kind: TokenKind) -> bool:
         return self._current().kind is kind
 
+    def _check_contextual(self, lexeme: str) -> bool:
+        matches = self._current().kind is TokenKind.IDENTIFIER and self._current().lexeme == lexeme
+        if lexeme == "use":
+            return (
+                matches
+                and self._peek_token(1).kind is TokenKind.IDENTIFIER
+                and self._peek_token(2).kind is TokenKind.AS
+            )
+        return matches
+
     def _advance(self) -> Token:
         token = self._current()
         if token.kind is not TokenKind.EOF:
@@ -1104,3 +1461,6 @@ class Parser:
     def _peek_kind(self) -> TokenKind:
         next_index = min(self._index + 1, len(self.tokens) - 1)
         return self.tokens[next_index].kind
+
+    def _peek_token(self, distance: int) -> Token:
+        return self.tokens[min(self._index + distance, len(self.tokens) - 1)]

@@ -50,6 +50,9 @@
         { "$ref": "#/$defs/unaryExpression" },
         { "$ref": "#/$defs/binaryExpression" },
         { "$ref": "#/$defs/callExpression" },
+        { "$ref": "#/$defs/humanInteractionExpression" },
+        { "$ref": "#/$defs/startTaskExpression" },
+        { "$ref": "#/$defs/awaitTaskExpression" },
         { "$ref": "#/$defs/memberAccessExpression" },
         { "$ref": "#/$defs/indexExpression" },
         { "$ref": "#/$defs/listLiteral" },
@@ -75,8 +78,17 @@
         { "$ref": "#/$defs/forStatement" },
         { "$ref": "#/$defs/breakStatement" },
         { "$ref": "#/$defs/continueStatement" },
+        { "$ref": "#/$defs/stepStatement" },
+        { "$ref": "#/$defs/goalClause" },
+        { "$ref": "#/$defs/requireClause" },
+        { "$ref": "#/$defs/invariantClause" },
+        { "$ref": "#/$defs/successClause" },
         { "$ref": "#/$defs/returnStatement" },
         { "$ref": "#/$defs/functionDeclaration" },
+        { "$ref": "#/$defs/taskDeclaration" },
+        { "$ref": "#/$defs/capabilityDeclaration" },
+        { "$ref": "#/$defs/useCapabilityDeclaration" },
+        { "$ref": "#/$defs/planRegion" },
         { "$ref": "#/$defs/recordDeclaration" },
         { "$ref": "#/$defs/enumDeclaration" },
         { "$ref": "#/$defs/matchStatement" },
@@ -93,6 +105,35 @@
           "properties": {
             "kind": { "const": "program" },
             "statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "startTaskExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["task_name", "arguments"],
+          "properties": {
+            "kind": { "const": "start_task_expression" },
+            "task_name": { "type": "string" },
+            "arguments": { "type": "array", "items": { "$ref": "#/$defs/callArgument" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "awaitTaskExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["operand"],
+          "properties": {
+            "kind": { "const": "await_task_expression" },
+            "operand": { "$ref": "#/$defs/expression" }
           }
         }
       ],
@@ -275,6 +316,26 @@
           "properties": {
             "kind": { "const": "call_expression" },
             "callee": { "$ref": "#/$defs/expression" },
+            "arguments": { "type": "array", "items": { "$ref": "#/$defs/callArgument" } }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "humanInteractionExpression": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["interaction_kind", "type_argument", "arguments"],
+          "properties": {
+            "kind": { "const": "human_interaction_expression" },
+            "interaction_kind": {
+              "enum": ["ask", "choose", "confirm", "inform", "handoff"]
+            },
+            "type_argument": {
+              "oneOf": [{ "$ref": "#/$defs/typeExpression" }, { "type": "null" }]
+            },
             "arguments": { "type": "array", "items": { "$ref": "#/$defs/callArgument" } }
           }
         }
@@ -515,6 +576,119 @@
       ],
       "unevaluatedProperties": false
     },
+    "stepStatement": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "body"],
+          "properties": {
+            "kind": { "const": "step_statement" },
+            "name": { "type": "string" },
+            "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "useCapabilityDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["capability_name", "alias"],
+          "properties": {
+            "kind": { "const": "use_capability_declaration" },
+            "capability_name": { "type": "string" },
+            "alias": { "type": "string" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "planRegion": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        { "type": "object", "required": ["body"], "properties": {
+          "kind": { "const": "plan_region" }, "body": { "$ref": "#/$defs/block" }
+        } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "goalClause": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["expression"],
+          "properties": {
+            "kind": { "const": "goal_clause" },
+            "expression": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "requireClause": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["condition"],
+          "properties": {
+            "kind": { "const": "require_clause" },
+            "condition": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "invariantClause": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["condition"],
+          "properties": {
+            "kind": { "const": "invariant_clause" },
+            "condition": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "successParameter": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "type_annotation"],
+          "properties": {
+            "kind": { "const": "success_parameter" },
+            "name": { "type": "string" },
+            "type_annotation": { "$ref": "#/$defs/typeExpression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "successClause": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["parameter", "condition"],
+          "properties": {
+            "kind": { "const": "success_clause" },
+            "parameter": {
+              "oneOf": [{ "$ref": "#/$defs/successParameter" }, { "type": "null" }]
+            },
+            "condition": { "$ref": "#/$defs/expression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "returnStatement": {
       "allOf": [
         { "$ref": "#/$defs/nodeBase" },
@@ -559,6 +733,54 @@
             "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
             "return_type": { "$ref": "#/$defs/typeExpression" },
             "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "taskDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "parameters", "return_type", "body"],
+          "properties": {
+            "kind": { "const": "task_declaration" },
+            "name": { "type": "string" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+            "return_type": { "$ref": "#/$defs/typeExpression" },
+            "body": { "$ref": "#/$defs/block" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "capabilityOperationSignature": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "parameters", "return_type"],
+          "properties": {
+            "kind": { "const": "capability_operation_signature" },
+            "name": { "type": "string" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+            "return_type": { "$ref": "#/$defs/typeExpression" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "capabilityDeclaration": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeBase" },
+        {
+          "type": "object",
+          "required": ["name", "operations"],
+          "properties": {
+            "kind": { "const": "capability_declaration" },
+            "name": { "type": "string" },
+            "operations": { "type": "array", "items": { "$ref": "#/$defs/capabilityOperationSignature" } }
           }
         }
       ],

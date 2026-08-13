@@ -9,6 +9,7 @@ from typing import cast
 from kaj.ast import (
     AssignmentOperator,
     AssignmentStatement,
+    AwaitTaskExpression,
     BinaryExpression,
     BinaryOperator,
     BindingDeclaration,
@@ -18,6 +19,8 @@ from kaj.ast import (
     BreakStatement,
     CallArgument,
     CallExpression,
+    CapabilityDeclaration,
+    CapabilityOperationSignature,
     ContinueStatement,
     DecimalLiteral,
     EnumConstructionExpression,
@@ -31,12 +34,15 @@ from kaj.ast import (
     ForStatement,
     FunctionDeclaration,
     GenericType,
+    GoalClause,
+    HumanInteractionExpression,
     Identifier,
     IfStatement,
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     InterpolatedString,
+    InvariantClause,
     ListLiteral,
     MapEntry,
     MapLiteral,
@@ -49,17 +55,25 @@ from kaj.ast import (
     NoneLiteral,
     Parameter,
     PatternBinding,
+    PlanRegion,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
     RecordFieldDeclaration,
     RecordFieldInitializer,
+    RequireClause,
     ReturnStatement,
+    StartTaskExpression,
     Statement,
+    StepStatement,
     StringLiteral,
+    SuccessClause,
+    SuccessParameter,
+    TaskDeclaration,
     TypeExpression,
     UnaryExpression,
     UnaryOperator,
+    UseCapabilityDeclaration,
     WhileStatement,
 )
 from kaj.source import SourceLocation, SourceSpan
@@ -267,6 +281,29 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
             },
             span,
         )
+    if isinstance(node, HumanInteractionExpression):
+        return _node(
+            "human_interaction_expression",
+            {
+                "interaction_kind": node.kind,
+                "type_argument": (
+                    None if node.type_argument is None else _encode_node(node.type_argument)
+                ),
+                "arguments": [_encode_node(item) for item in node.arguments],
+            },
+            span,
+        )
+    if isinstance(node, StartTaskExpression):
+        return _node(
+            "start_task_expression",
+            {
+                "task_name": node.task_name,
+                "arguments": [_encode_node(argument) for argument in node.arguments],
+            },
+            span,
+        )
+    if isinstance(node, AwaitTaskExpression):
+        return _node("await_task_expression", {"operand": _encode_node(node.operand)}, span)
     if isinstance(node, MemberAccessExpression):
         return _node(
             "member_access_expression",
@@ -398,6 +435,41 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
         return _node("break_statement", {}, span)
     if isinstance(node, ContinueStatement):
         return _node("continue_statement", {}, span)
+    if isinstance(node, StepStatement):
+        return _node(
+            "step_statement",
+            {"name": node.name, "body": _encode_node(node.body)},
+            span,
+        )
+    if isinstance(node, UseCapabilityDeclaration):
+        return _node(
+            "use_capability_declaration",
+            {"capability_name": node.capability_name, "alias": node.alias},
+            span,
+        )
+    if isinstance(node, PlanRegion):
+        return _node("plan_region", {"body": _encode_node(node.body)}, span)
+    if isinstance(node, GoalClause):
+        return _node("goal_clause", {"expression": _encode_node(node.expression)}, span)
+    if isinstance(node, RequireClause):
+        return _node("require_clause", {"condition": _encode_node(node.condition)}, span)
+    if isinstance(node, InvariantClause):
+        return _node("invariant_clause", {"condition": _encode_node(node.condition)}, span)
+    if isinstance(node, SuccessParameter):
+        return _node(
+            "success_parameter",
+            {"name": node.name, "type_annotation": _encode_node(node.type_annotation)},
+            span,
+        )
+    if isinstance(node, SuccessClause):
+        return _node(
+            "success_clause",
+            {
+                "parameter": (None if node.parameter is None else _encode_node(node.parameter)),
+                "condition": _encode_node(node.condition),
+            },
+            span,
+        )
     if isinstance(node, ReturnStatement):
         return _node(
             "return_statement",
@@ -448,6 +520,36 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
                 "parameters": [_encode_node(parameter) for parameter in node.parameters],
                 "return_type": _encode_node(node.return_type),
                 "body": _encode_node(node.body),
+            },
+            span,
+        )
+    if isinstance(node, TaskDeclaration):
+        return _node(
+            "task_declaration",
+            {
+                "name": node.name,
+                "parameters": [_encode_node(parameter) for parameter in node.parameters],
+                "return_type": _encode_node(node.return_type),
+                "body": _encode_node(node.body),
+            },
+            span,
+        )
+    if isinstance(node, CapabilityOperationSignature):
+        return _node(
+            "capability_operation_signature",
+            {
+                "name": node.name,
+                "parameters": [_encode_node(parameter) for parameter in node.parameters],
+                "return_type": _encode_node(node.return_type),
+            },
+            span,
+        )
+    if isinstance(node, CapabilityDeclaration):
+        return _node(
+            "capability_declaration",
+            {
+                "name": node.name,
+                "operations": [_encode_node(operation) for operation in node.operations],
             },
             span,
         )
@@ -592,7 +694,8 @@ def _decode_interpolated_string(obj: dict[str, object], path: JSONPath) -> Node:
             parts.append(decoded)
         else:
             raise ASTJSONError(
-                ASTJSON_INVALID_FIELD, "Interpolation part kind must be text or expression.",
+                ASTJSON_INVALID_FIELD,
+                "Interpolation part kind must be text or expression.",
                 part_path + ("kind",),
             )
     return InterpolatedString(span=_span_field(obj, path), parts=tuple(parts))
@@ -658,6 +761,44 @@ def _decode_call(obj: dict[str, object], path: JSONPath) -> Node:
         callee=_expression_field(obj, "callee", path),
         arguments=tuple(arguments),
     )
+
+
+def _decode_human_interaction(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"interaction_kind", "type_argument", "arguments"}, path)
+    kind = _string_field(obj, "interaction_kind", path)
+    if kind not in {"ask", "choose", "confirm", "inform", "handoff"}:
+        raise ASTJSONError(
+            ASTJSON_INVALID_FIELD,
+            "Unknown human interaction kind.",
+            path + ("interaction_kind",),
+        )
+    type_data = _required(obj, "type_argument", path)
+    type_argument = None
+    if type_data is not None:
+        type_argument = _expect_type_expression(
+            _decode_node(type_data, path + ("type_argument",)),
+            path + ("type_argument",),
+        )
+    return HumanInteractionExpression(
+        span=_span_field(obj, path),
+        kind=kind,
+        type_argument=type_argument,
+        arguments=tuple(_node_list(obj, "arguments", path, _expect_call_argument)),
+    )
+
+
+def _decode_start_task(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"task_name", "arguments"}, path)
+    return StartTaskExpression(
+        _span_field(obj, path),
+        _string_field(obj, "task_name", path),
+        tuple(_node_list(obj, "arguments", path, _expect_call_argument)),
+    )
+
+
+def _decode_await_task(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"operand"}, path)
+    return AwaitTaskExpression(_span_field(obj, path), _expression_field(obj, "operand", path))
 
 
 def _decode_member(obj: dict[str, object], path: JSONPath) -> Node:
@@ -854,6 +995,86 @@ def _decode_continue(obj: dict[str, object], path: JSONPath) -> Node:
     return ContinueStatement(span=_span_field(obj, path))
 
 
+def _decode_step(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "body"}, path)
+    return StepStatement(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        body=_block_field(obj, "body", path),
+    )
+
+
+def _decode_use_capability(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"capability_name", "alias"}, path)
+    return UseCapabilityDeclaration(
+        span=_span_field(obj, path),
+        capability_name=_string_field(obj, "capability_name", path),
+        alias=_string_field(obj, "alias", path),
+    )
+
+
+def _decode_plan_region(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"body"}, path)
+    return PlanRegion(_span_field(obj, path), _block_field(obj, "body", path))
+
+
+def _decode_goal(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"expression"}, path)
+    return GoalClause(
+        span=_span_field(obj, path),
+        expression=_expression_field(obj, "expression", path),
+    )
+
+
+def _decode_require(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"condition"}, path)
+    return RequireClause(
+        span=_span_field(obj, path),
+        condition=_expression_field(obj, "condition", path),
+    )
+
+
+def _decode_invariant(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"condition"}, path)
+    return InvariantClause(
+        span=_span_field(obj, path),
+        condition=_expression_field(obj, "condition", path),
+    )
+
+
+def _decode_success_parameter(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "type_annotation"}, path)
+    annotation = _expect_type_expression(
+        _decode_node(_required(obj, "type_annotation", path), path + ("type_annotation",)),
+        path + ("type_annotation",),
+    )
+    return SuccessParameter(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        type_annotation=annotation,
+    )
+
+
+def _decode_success(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"parameter", "condition"}, path)
+    parameter_data = _required(obj, "parameter", path)
+    parameter: SuccessParameter | None = None
+    if parameter_data is not None:
+        decoded = _decode_node(parameter_data, path + ("parameter",))
+        if not isinstance(decoded, SuccessParameter):
+            raise ASTJSONError(
+                ASTJSON_INVALID_FIELD,
+                "Success parameter must be a success_parameter node or null.",
+                path + ("parameter",),
+            )
+        parameter = decoded
+    return SuccessClause(
+        span=_span_field(obj, path),
+        parameter=parameter,
+        condition=_expression_field(obj, "condition", path),
+    )
+
+
 def _decode_return(obj: dict[str, object], path: JSONPath) -> Node:
     _check_node_fields(obj, {"value"}, path)
     value_data = _required(obj, "value", path)
@@ -933,6 +1154,53 @@ def _decode_function(obj: dict[str, object], path: JSONPath) -> Node:
         parameters=tuple(parameters),
         return_type=return_type,
         body=_block_field(obj, "body", path),
+    )
+
+
+def _decode_task(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "parameters", "return_type", "body"}, path)
+    parameters = _node_list(obj, "parameters", path, _expect_parameter)
+    return_type = _expect_type_expression(
+        _decode_node(_required(obj, "return_type", path), path + ("return_type",)),
+        path + ("return_type",),
+    )
+    return TaskDeclaration(
+        span=_span_field(obj, path),
+        name=_string_field(obj, "name", path),
+        parameters=tuple(parameters),
+        return_type=return_type,
+        body=_block_field(obj, "body", path),
+    )
+
+
+def _decode_capability_operation(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "parameters", "return_type"}, path)
+    parameters = _node_list(obj, "parameters", path, _expect_parameter)
+    return_type = _expect_type_expression(
+        _decode_node(_required(obj, "return_type", path), path + ("return_type",)),
+        path + ("return_type",),
+    )
+    return CapabilityOperationSignature(
+        _span_field(obj, path),
+        _string_field(obj, "name", path),
+        tuple(parameters),
+        return_type,
+    )
+
+
+def _expect_capability_operation(node: Node, path: JSONPath) -> CapabilityOperationSignature:
+    if not isinstance(node, CapabilityOperationSignature):
+        raise ASTJSONError(ASTJSON_INVALID_FIELD, "Expected capability operation.", path)
+    return node
+
+
+def _decode_capability(obj: dict[str, object], path: JSONPath) -> Node:
+    _check_node_fields(obj, {"name", "operations"}, path)
+    operations = _node_list(obj, "operations", path, _expect_capability_operation)
+    return CapabilityDeclaration(
+        _span_field(obj, path),
+        _string_field(obj, "name", path),
+        tuple(operations),
     )
 
 
@@ -1025,6 +1293,9 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "binary_expression": _decode_binary,
     "call_argument": _decode_call_argument,
     "call_expression": _decode_call,
+    "human_interaction_expression": _decode_human_interaction,
+    "start_task_expression": _decode_start_task,
+    "await_task_expression": _decode_await_task,
     "member_access_expression": _decode_member,
     "index_expression": _decode_index,
     "list_literal": _decode_list,
@@ -1045,6 +1316,14 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "for_statement": _decode_for,
     "break_statement": _decode_break,
     "continue_statement": _decode_continue,
+    "step_statement": _decode_step,
+    "use_capability_declaration": _decode_use_capability,
+    "plan_region": _decode_plan_region,
+    "goal_clause": _decode_goal,
+    "require_clause": _decode_require,
+    "invariant_clause": _decode_invariant,
+    "success_parameter": _decode_success_parameter,
+    "success_clause": _decode_success,
     "return_statement": _decode_return,
     "pattern_binding": _decode_pattern_binding,
     "enum_pattern": _decode_enum_pattern,
@@ -1052,6 +1331,9 @@ _NODE_DECODERS: dict[str, NodeDecoder] = {
     "match_statement": _decode_match_statement,
     "parameter": _decode_parameter,
     "function_declaration": _decode_function,
+    "task_declaration": _decode_task,
+    "capability_operation_signature": _decode_capability_operation,
+    "capability_declaration": _decode_capability,
     "record_field_declaration": _decode_record_field_declaration,
     "record_declaration": _decode_record_declaration,
     "enum_payload_field": _decode_enum_payload_field,

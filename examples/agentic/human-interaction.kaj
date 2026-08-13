@@ -1,0 +1,17 @@
+task Welcome() -> String {
+    goal "Welcome a person by name"
+
+    step identify {
+        let name = ask<String>("What is your name?")
+        let approved = confirm("Use {name}?")
+
+        if not approved {
+            return "cancelled"
+        }
+
+        inform("Welcome, {name}")
+        return name
+    }
+
+    return "cancelled"
+}

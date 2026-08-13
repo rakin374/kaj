@@ -1,0 +1,9 @@
+task Replanned() -> Int {
+    goal "Revise future work only"
+    invariant {
+        true
+    }
+    plan {
+    }
+    return 42
+}

@@ -18,6 +18,7 @@ from kaj.semantic import (
     ResultType,
     Symbol,
     TypeCheckResult,
+    ValueType,
 )
 
 
@@ -94,6 +95,12 @@ class KajModuleValue:
 
 
 @dataclass(frozen=True)
+class KajTaskHandle:
+    task_id: str
+    result_type: ValueType
+
+
+@dataclass(frozen=True)
 class KajFunction:
     declaration: FunctionDeclaration
     symbol: Symbol
@@ -128,6 +135,7 @@ type RuntimeValue = (
     | KajModuleValue
     | KajFunction
     | BuiltinFunction
+    | KajTaskHandle
 )
 
 

@@ -13,6 +13,8 @@ from kaj.semantic.type_checker import (
 )
 from kaj.semantic.types import (
     BuiltinFunctionType,
+    CapabilityOperationType,
+    CapabilityType,
     EnumDefinition,
     EnumPayloadFieldType,
     EnumType,
@@ -33,6 +35,8 @@ from kaj.semantic.types import (
     RecordType,
     ResultType,
     SemanticType,
+    TaskHandleType,
+    TaskType,
     TypeSymbol,
     ValueType,
     is_assignable,
@@ -40,6 +44,8 @@ from kaj.semantic.types import (
 
 __all__ = [
     "BuiltinFunctionType",
+    "CapabilityOperationType",
+    "CapabilityType",
     "DeclaredSymbol",
     "EnumDefinition",
     "EnumPayloadFieldType",
@@ -72,6 +78,8 @@ __all__ = [
     "SemanticType",
     "Symbol",
     "SymbolKind",
+    "TaskHandleType",
+    "TaskType",
     "TypeCheckResult",
     "TypeChecker",
     "TypeSymbol",

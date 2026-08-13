@@ -5,6 +5,7 @@ from decimal import Decimal
 from kaj.ast import (
     AssignmentOperator,
     AssignmentStatement,
+    AwaitTaskExpression,
     BinaryExpression,
     BinaryOperator,
     BindingDeclaration,
@@ -14,6 +15,7 @@ from kaj.ast import (
     BreakStatement,
     CallArgument,
     CallExpression,
+    CapabilityDeclaration,
     ContinueStatement,
     DecimalLiteral,
     EnumConstructionExpression,
@@ -24,12 +26,15 @@ from kaj.ast import (
     ForStatement,
     FunctionDeclaration,
     GenericType,
+    GoalClause,
+    HumanInteractionExpression,
     Identifier,
     IfStatement,
     ImportDeclaration,
     IndexExpression,
     IntegerLiteral,
     InterpolatedString,
+    InvariantClause,
     ListLiteral,
     MapLiteral,
     MatchStatement,
@@ -37,15 +42,22 @@ from kaj.ast import (
     NamedType,
     NewtypeDeclaration,
     NoneLiteral,
+    PlanRegion,
     Program,
     RecordConstructionExpression,
     RecordDeclaration,
+    RequireClause,
     ReturnStatement,
+    StartTaskExpression,
     Statement,
+    StepStatement,
     StringLiteral,
+    SuccessClause,
+    TaskDeclaration,
     TypeExpression,
     UnaryExpression,
     UnaryOperator,
+    UseCapabilityDeclaration,
     WhileStatement,
 )
 
@@ -105,7 +117,13 @@ def format_program(program: Program) -> str:
         rendered = formatter.statement(statement, 0)
         declaration = isinstance(
             statement,
-            (FunctionDeclaration, RecordDeclaration, EnumDeclaration, NewtypeDeclaration),
+            (
+                FunctionDeclaration,
+                TaskDeclaration,
+                RecordDeclaration,
+                EnumDeclaration,
+                NewtypeDeclaration,
+            ),
         )
         if groups and (declaration or previous_declaration):
             groups.append("")
@@ -144,6 +162,26 @@ class _Formatter:
             return [prefix + "break"]
         if isinstance(statement, ContinueStatement):
             return [prefix + "continue"]
+        if isinstance(statement, StepStatement):
+            return self.header_block(f"step {statement.name}", statement.body, depth)
+        if isinstance(statement, UseCapabilityDeclaration):
+            return [prefix + f"use {statement.capability_name} as {statement.alias}"]
+        if isinstance(statement, PlanRegion):
+            return self.header_block("plan", statement.body, depth)
+        if isinstance(statement, GoalClause):
+            return [prefix + "goal " + self.expression(statement.expression, depth)]
+        if isinstance(statement, RequireClause):
+            return self.contract_condition("require", statement.condition, depth)
+        if isinstance(statement, InvariantClause):
+            return self.contract_condition("invariant", statement.condition, depth)
+        if isinstance(statement, SuccessClause):
+            parameter = ""
+            if statement.parameter is not None:
+                parameter = (
+                    f"({statement.parameter.name}: "
+                    f"{self.type_expression(statement.parameter.type_annotation)})"
+                )
+            return self.contract_condition("success" + parameter, statement.condition, depth)
         if isinstance(statement, Block):
             return self.block(statement, depth)
         if isinstance(statement, FunctionDeclaration):
@@ -156,6 +194,33 @@ class _Formatter:
             )
             header = f"fn {statement.name}({parameters}) -> {self.type_expression(statement.return_type)}"
             return self.header_block(header, statement.body, depth)
+        if isinstance(statement, TaskDeclaration):
+            parameters = ", ".join(
+                ("var " if parameter.mutable else "")
+                + parameter.name
+                + ": "
+                + self.type_expression(parameter.type_annotation)
+                for parameter in statement.parameters
+            )
+            header = (
+                f"task {statement.name}({parameters}) -> "
+                f"{self.type_expression(statement.return_type)}"
+            )
+            return self.header_block(header, statement.body, depth)
+        if isinstance(statement, CapabilityDeclaration):
+            lines = [prefix + f"capability {statement.name} {{"]
+            for operation in statement.operations:
+                parameters = ", ".join(
+                    parameter.name + ": " + self.type_expression(parameter.type_annotation)
+                    for parameter in operation.parameters
+                )
+                lines.append(
+                    INDENT * (depth + 1)
+                    + f"fn {operation.name}({parameters}) -> "
+                    + self.type_expression(operation.return_type)
+                )
+            lines.append(prefix + "}")
+            return lines
         if isinstance(statement, RecordDeclaration):
             lines = [prefix + f"type {statement.name} {{"]
             lines.extend(
@@ -216,6 +281,14 @@ class _Formatter:
             lines.append(prefix + "}")
             return lines
         raise FormatterError(f"FORMAT_UNSUPPORTED_NODE: {type(statement).__name__}")
+
+    def contract_condition(self, header: str, condition: Expression, depth: int) -> list[str]:
+        prefix = INDENT * depth
+        return [
+            prefix + header + " {",
+            INDENT * (depth + 1) + self.expression(condition, depth + 1),
+            prefix + "}",
+        ]
 
     def if_statement(self, statement: IfStatement, depth: int) -> list[str]:
         lines = self.header_block(
@@ -310,6 +383,27 @@ class _Formatter:
                 ")",
                 depth,
             )
+        elif isinstance(expression, HumanInteractionExpression):
+            generic = (
+                ""
+                if expression.type_argument is None
+                else f"<{self.type_expression(expression.type_argument)}>"
+            )
+            text = self.comma_construct(
+                expression.kind + generic + "(",
+                [self.call_argument(item, depth) for item in expression.arguments],
+                ")",
+                depth,
+            )
+        elif isinstance(expression, StartTaskExpression):
+            text = self.comma_construct(
+                "start " + expression.task_name + "(",
+                [self.call_argument(item, depth) for item in expression.arguments],
+                ")",
+                depth,
+            )
+        elif isinstance(expression, AwaitTaskExpression):
+            text = "await " + self.expression(expression.operand, depth, 8)
         elif isinstance(expression, MemberAccessExpression):
             text = self.expression(expression.object, depth, 9, "left") + "." + expression.member
         elif isinstance(expression, IndexExpression):
@@ -373,7 +467,15 @@ class _Formatter:
             return _PRECEDENCE[expression.operator]
         if isinstance(expression, UnaryExpression):
             return 7
-        if isinstance(expression, (CallExpression, MemberAccessExpression, IndexExpression)):
+        if isinstance(
+            expression,
+            (
+                CallExpression,
+                HumanInteractionExpression,
+                MemberAccessExpression,
+                IndexExpression,
+            ),
+        ):
             return 9
         return 10
 

@@ -45,14 +45,8 @@ def test_keywords_are_case_sensitive(source: str) -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "task",
-        "step",
-        "goal",
-        "success",
-        "require",
         "verify",
         "observe",
-        "ask",
         "use",
     ],
 )
@@ -60,3 +54,46 @@ def test_deferred_agent_words_are_identifiers(source: str) -> None:
     result = Lexer(source).tokenize()
 
     assert result.tokens[0].kind is TokenKind.IDENTIFIER
+
+
+def test_task_is_a_reserved_keyword() -> None:
+    result = Lexer("task").tokenize()
+
+    assert result.tokens[0].kind is TokenKind.TASK
+
+
+def test_step_is_a_reserved_keyword() -> None:
+    result = Lexer("step").tokenize()
+
+    assert result.tokens[0].kind is TokenKind.STEP
+
+
+@pytest.mark.parametrize(
+    ("source", "kind"),
+    [
+        ("goal", TokenKind.GOAL),
+        ("require", TokenKind.REQUIRE),
+        ("invariant", TokenKind.INVARIANT),
+        ("success", TokenKind.SUCCESS),
+    ],
+)
+def test_task_contract_words_are_reserved(source: str, kind: TokenKind) -> None:
+    result = Lexer(source).tokenize()
+
+    assert result.tokens[0].kind is kind
+
+
+@pytest.mark.parametrize(
+    ("source", "kind"),
+    [
+        ("ask", TokenKind.ASK),
+        ("choose", TokenKind.CHOOSE),
+        ("confirm", TokenKind.CONFIRM),
+        ("inform", TokenKind.INFORM),
+        ("handoff", TokenKind.HANDOFF),
+    ],
+)
+def test_human_interaction_words_are_reserved(source: str, kind: TokenKind) -> None:
+    result = Lexer(source).tokenize()
+
+    assert result.tokens[0].kind is kind

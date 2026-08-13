@@ -20,6 +20,27 @@ class FunctionDeclaration(Statement):
 
 
 @dataclass(frozen=True)
+class TaskDeclaration(Statement):
+    name: str
+    parameters: tuple[Parameter, ...]
+    return_type: TypeExpression
+    body: Block
+
+
+@dataclass(frozen=True)
+class CapabilityOperationSignature(Node):
+    name: str
+    parameters: tuple[Parameter, ...]
+    return_type: TypeExpression
+
+
+@dataclass(frozen=True)
+class CapabilityDeclaration(Statement):
+    name: str
+    operations: tuple[CapabilityOperationSignature, ...]
+
+
+@dataclass(frozen=True)
 class RecordFieldDeclaration(Node):
     name: str
     type_annotation: TypeExpression

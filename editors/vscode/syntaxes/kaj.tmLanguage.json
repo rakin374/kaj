@@ -7,6 +7,8 @@
     { "include": "#strings" },
     { "include": "#type-declarations" },
     { "include": "#function-declarations" },
+    { "include": "#task-declarations" },
+    { "include": "#step-declarations" },
     { "include": "#imports" },
     { "include": "#keywords" },
     { "include": "#constants" },
@@ -94,6 +96,28 @@
         }
       ]
     },
+    "task-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(task)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.task.kaj" },
+            "2": { "name": "entity.name.function.kaj" }
+          }
+        }
+      ]
+    },
+    "step-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(step)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.step.kaj" },
+            "2": { "name": "entity.name.label.kaj" }
+          }
+        }
+      ]
+    },
     "imports": {
       "patterns": [
         {
@@ -109,7 +133,7 @@
       "patterns": [
         {
           "name": "keyword.declaration.kaj",
-          "match": "\\b(?:let|var|fn|type|enum|newtype)\\b"
+          "match": "\\b(?:let|var|fn|task|step|goal|require|invariant|success|ask|choose|confirm|inform|handoff|capability|use|as|start|await|plan|type|enum|newtype)\\b"
         },
         {
           "name": "keyword.control.kaj",

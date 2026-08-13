@@ -47,6 +47,10 @@ Formatter failures display the CLI's stderr. A missing executable produces a dir
 
 ## Current language boundary
 
-Highlighting follows the implemented pure Kaj language and intentionally excludes future agentic syntax. `break` and `continue` are fully executable in the nearest enclosing loop. String interpolation expressions inside `{...}` receive embedded Kaj highlighting; double braces represent literal braces.
+Highlighting follows the implemented Pure Kaj language plus Agentic tasks, named steps, task
+contracts, and human interaction primitives. It intentionally excludes later agentic syntax.
+`break` and `continue` are fully executable in the nearest enclosing loop. String interpolation
+expressions inside `{...}` receive embedded Kaj highlighting; double braces represent literal
+braces.
 
-For exact syntax and behavior, use the repository's `docs/language/` reference.
+For exact syntax and behavior, use the repository's `docs/language/` reference and task specification.

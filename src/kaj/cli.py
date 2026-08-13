@@ -11,7 +11,7 @@ from kaj.diagnostics import Diagnostic
 from kaj.formatting import format_program
 from kaj.modules import compile_module_graph
 from kaj.pipeline import parse_source
-from kaj.runtime import Interpreter, KajModuleValue, StreamOutput
+from kaj.runtime import Interpreter, KajModuleValue, StreamOutput, TaskRuntime, TaskStartError
 from kaj.serialization import ast_to_json
 
 EXIT_SUCCESS = 0
@@ -19,7 +19,11 @@ EXIT_COMPILE_ERROR = 1
 EXIT_RUNTIME_ERROR = 2
 EXIT_CLI_MISUSE = 64
 
-USAGE = "usage: kaj {check|run|fmt|ast} <file>\n       kaj --version"
+USAGE = (
+    "usage: kaj {check|run|fmt|ast} <file>\n"
+    "       kaj task run <file> <TaskName>\n"
+    "       kaj --version"
+)
 
 
 def cli_main(
@@ -41,6 +45,8 @@ def cli_main(
         print(USAGE, file=out)
         return EXIT_SUCCESS
     command = arguments[0]
+    if command == "task":
+        return _task_command(arguments, out, err)
     if command not in {"check", "run", "fmt", "ast"}:
         return _misuse(f"unknown command '{command}'", err)
     if len(arguments) == 2 and arguments[1] in {"--help", "-h"}:
@@ -61,6 +67,26 @@ def cli_main(
     if command == "fmt":
         return _fmt(loaded, path, err)
     return _ast(loaded, path, out, err)
+
+
+def _task_command(arguments: list[str], stdout: TextIO, stderr: TextIO) -> int:
+    usage = "usage: kaj task run <file> <TaskName>"
+    if arguments in (["task", "--help"], ["task", "-h"]):
+        print(usage, file=stdout)
+        return EXIT_SUCCESS
+    if len(arguments) < 2 or arguments[1] != "run":
+        print("error: expected 'run' after 'task'", file=stderr)
+        print(usage, file=stderr)
+        return EXIT_CLI_MISUSE
+    if len(arguments) != 4:
+        print("error: task run requires a file and task name", file=stderr)
+        print(usage, file=stderr)
+        return EXIT_CLI_MISUSE
+    path = Path(arguments[2])
+    source = _load_source(path, stderr)
+    if source is None:
+        return EXIT_CLI_MISUSE
+    return _run_task(source, path, arguments[3], stdout, stderr)
 
 
 def _misuse(message: str, stderr: TextIO, command: str | None = None) -> int:
@@ -140,15 +166,72 @@ def _run(source: str, path: Path, stdout: TextIO, stderr: TextIO) -> int:
     return EXIT_SUCCESS
 
 
+def _run_task(source: str, path: Path, task_name: str, stdout: TextIO, stderr: TextIO) -> int:
+    graph = compile_module_graph(path, source)
+    if graph.diagnostics:
+        for item in graph.diagnostics:
+            print(render_diagnostic(item.path, item.diagnostic), file=stderr)
+        return EXIT_COMPILE_ERROR
+    if graph.entry is None:
+        raise RuntimeError("module graph omitted entry without diagnostics")
+    initialized: dict[str, KajModuleValue] = {}
+    output = StreamOutput(stdout)
+    for result in graph.modules[:-1]:
+        imported = {
+            id(declaration): _runtime_namespace_chain(declaration.path, initialized)
+            for declaration, _ in result.imported_namespaces
+        }
+        execution = Interpreter(
+            result.resolution, result.types, output=output, imported_modules=imported
+        ).interpret(result.loaded.program)
+        if execution.runtime_error is not None:
+            diagnostic = Diagnostic(
+                execution.runtime_error.code,
+                execution.runtime_error.message,
+                execution.runtime_error.span,
+            )
+            print(render_diagnostic(result.loaded.path, diagnostic), file=stderr)
+            return EXIT_RUNTIME_ERROR
+        if result.loaded.name is not None:
+            initialized[result.loaded.name.dotted] = KajModuleValue(
+                result.loaded.name.dotted, execution.exports
+            )
+    entry = graph.entry
+    imported = {
+        id(declaration): _runtime_namespace_chain(declaration.path, initialized)
+        for declaration, _ in entry.imported_namespaces
+    }
+    runtime = TaskRuntime(
+        entry.loaded.program,
+        entry.resolution,
+        entry.types,
+        output=output,
+        imported_modules=imported,
+    )
+    try:
+        instance = runtime.start_task(task_name)
+    except TaskStartError as error:
+        diagnostic = Diagnostic(error.code, error.message, entry.loaded.program.span)
+        print(render_diagnostic(path, diagnostic), file=stderr)
+        return EXIT_RUNTIME_ERROR
+    if instance.failure is not None:
+        diagnostic = Diagnostic(
+            instance.failure.code,
+            instance.failure.message,
+            instance.failure.runtime_error.span,
+        )
+        print(render_diagnostic(path, diagnostic), file=stderr)
+        return EXIT_RUNTIME_ERROR
+    return EXIT_SUCCESS
+
+
 def _runtime_namespace_chain(
     path: tuple[str, ...], initialized: dict[str, KajModuleValue]
 ) -> KajModuleValue:
     target = initialized[".".join(path)]
     namespace = target
     for index in range(len(path) - 2, -1, -1):
-        namespace = KajModuleValue(
-            ".".join(path[: index + 1]), ((path[index + 1], namespace),)
-        )
+        namespace = KajModuleValue(".".join(path[: index + 1]), ((path[index + 1], namespace),))
     return namespace
 
 

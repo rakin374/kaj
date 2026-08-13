@@ -41,3 +41,31 @@ class Environment:
                 return slot
             environment = environment.parent
         raise KeyError(symbol.id)
+
+    def snapshot(self) -> tuple[tuple[Environment, dict[int, RuntimeSlot]], ...]:
+        chain: list[tuple[Environment, dict[int, RuntimeSlot]]] = []
+        environment: Environment | None = self
+        while environment is not None:
+            chain.append(
+                (
+                    environment,
+                    {
+                        key: RuntimeSlot(slot.symbol, slot.value, slot.mutable)
+                        for key, slot in environment._slots.items()
+                    },
+                )
+            )
+            environment = environment.parent
+        return tuple(chain)
+
+    def local_slots(self) -> tuple[RuntimeSlot, ...]:
+        """Return this frame's bindings for durable task snapshots."""
+        return tuple(self._slots.values())
+
+    def replace_local_slots(self, slots: tuple[RuntimeSlot, ...]) -> None:
+        self._slots = {slot.symbol.id: slot for slot in slots}
+
+    @staticmethod
+    def restore(snapshot: tuple[tuple[Environment, dict[int, RuntimeSlot]], ...]) -> None:
+        for environment, slots in snapshot:
+            environment._slots = slots
