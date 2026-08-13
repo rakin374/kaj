@@ -355,7 +355,7 @@ A returned `Result.err(...)` value is not a step failure unless ordinary Kaj cod
 
 ## 14. Task lifecycle
 
-Checkpoint 2 expands task lifecycle to:
+Agentic tasks use this lifecycle:
 
 ```text
 created
@@ -407,7 +407,8 @@ The initial safe boundary is between steps.
 
 A paused task does not continue executing until resumed by the host.
 
-Checkpoint 2 defines the state but does not define durable persistence across process restart.
+Durable behavior across process restart is defined by
+[Persistence and Resume](persistence-resume.md).
 
 ---
 
@@ -506,9 +507,8 @@ This execution record is runtime state, not source AST.
 
 Once a step completes, the runtime records it as completed for the lifetime of the TaskInstance.
 
-Checkpoint 2 does not yet define restart persistence.
-
-Later persistence/resume semantics will use these records.
+Persistence and resume semantics use these completion records to avoid replaying
+committed steps.
 
 ---
 
@@ -538,7 +538,7 @@ The exact external cancellation API is host/runtime-specific.
 
 Failed steps do not automatically retry.
 
-There is no retry syntax in this checkpoint.
+There is no retry syntax in Agentic Kaj Conformance 1.
 
 Retry semantics may be introduced later.
 

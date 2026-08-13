@@ -540,7 +540,7 @@ The exact host instance identifier is runtime-specific.
 
 ## 27. Binding persistence
 
-Checkpoint 6 integrates with persistent tasks.
+Capability bindings integrate with persistent tasks.
 
 Persistent snapshots must not serialize the native adapter object itself.
 
@@ -668,7 +668,7 @@ Some capability operations may complete immediately.
 
 Others may require asynchronous host work.
 
-Checkpoint 6 introduces:
+Capability execution supports:
 
 ```text
 waiting_for_capability
@@ -789,7 +789,8 @@ request status
 continuation
 ```
 
-However, exactly-once external execution is not guaranteed by this checkpoint.
+However, exactly-once external execution is not guaranteed by Agentic Kaj
+Conformance 1.
 
 ---
 
@@ -797,7 +798,7 @@ However, exactly-once external execution is not guaranteed by this checkpoint.
 
 If the runtime crashes after sending a host operation but before durably recording completion, the operation may be in an uncertain state.
 
-Checkpoint 6 must represent this explicitly.
+The runtime must represent this explicitly.
 
 Do not silently replay potentially effectful operations without policy.
 
@@ -823,7 +824,7 @@ A capability operation may be declared/registered by the host as safely retryabl
 
 The exact language syntax for idempotency is deferred.
 
-Checkpoint 6 runtime APIs may attach host metadata such as:
+Runtime APIs may attach host metadata such as:
 
 ```text
 retry_safe
@@ -965,7 +966,7 @@ This rule is frozen now even though planning is introduced later.
 
 ## 55. Summary
 
-Checkpoint 6 freezes:
+Agentic Kaj Conformance 1 freezes:
 
 ```text
 capability declarations define typed host interfaces

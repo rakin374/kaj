@@ -277,7 +277,7 @@ When the awaited child reaches a terminal state, the parent becomes runnable aga
 
 ## 14. Lifecycle transitions
 
-Checkpoint 7 adds:
+Task composition adds:
 
 ```text
 waiting_for_task
@@ -857,7 +857,7 @@ parent completed:
 
 ## 50. Summary
 
-Checkpoint 7 freezes:
+Agentic Kaj Conformance 1 freezes:
 
 ```text
 start Task(args...) -> TaskHandle<T>

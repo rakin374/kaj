@@ -410,7 +410,7 @@ future replanning
 
 ## 21. Planning lifecycle state
 
-Checkpoint 8 adds:
+Planning adds:
 
 ```text
 waiting_for_planner
@@ -820,7 +820,7 @@ Even if the planner runs inside the same process, Kaj must treat proposals as ex
 
 ## 50. Summary
 
-Checkpoint 8 freezes:
+Agentic Kaj Conformance 1 freezes:
 
 ```text
 planner is optional and external to runtime

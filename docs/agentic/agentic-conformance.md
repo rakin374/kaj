@@ -2,9 +2,9 @@
 
 Agentic Conformance defines the minimum behavior an implementation must satisfy to claim compatibility with the initial Agentic Kaj runtime model.
 
-This checkpoint does not add major new language features.
-
-It freezes cross-feature semantics, compatibility expectations, conformance fixtures, lifecycle rules, persistence guarantees, planner/capability isolation, and regression requirements across Agentic Kaj Checkpoints 1–9.
+It freezes cross-feature semantics, compatibility expectations, lifecycle rules,
+persistence guarantees, and planner/capability isolation for Agentic Kaj
+Conformance 1.
 
 ---
 
@@ -24,11 +24,14 @@ planner interface
 controlled replanning
 ```
 
-Checkpoint 10 validates that these features behave as one coherent system.
+Conformance validates that these features behave as one coherent system.
 
 The goal is not merely that each subsystem passes isolated tests.
 
 The goal is that an implementation behaves consistently across subsystem boundaries.
+
+For a practical introduction before reading the compatibility rules, see the
+[Agentic Kaj overview](index.md).
 
 ---
 
@@ -968,7 +971,7 @@ no runtime state in source AST
 
 ## 58. Initial Agentic Kaj boundary
 
-After Checkpoint 10, the initial Agentic Kaj foundation is considered complete.
+Agentic Kaj Conformance 1 marks the initial foundation as complete.
 
 Future work may add:
 

@@ -74,7 +74,7 @@ The goal is:
 
 ```text
 human-readable
-planner-visible in future checkpoints
+planner-visible
 available to host UI/runtime inspection
 immutable for the lifetime of a task instance
 not itself proof of completion
@@ -668,7 +668,7 @@ completed
 
 ## 29. Paused tasks
 
-Checkpoint 2 pause semantics remain unchanged.
+Normal task pause semantics remain unchanged.
 
 Pausing does not itself re-evaluate contracts.
 

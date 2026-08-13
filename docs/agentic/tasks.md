@@ -2,7 +2,10 @@
 
 Tasks are Agentic Kaj's durable unit of work.
 
-A task is distinct from an ordinary function. Functions perform ordinary computation. Tasks represent work that has its own runtime identity and lifecycle and may gain suspension, persistence, human interaction, capabilities, and planning semantics in later Agentic Kaj features.
+A task is distinct from an ordinary function. Functions perform ordinary
+computation. Tasks represent work with runtime identity and lifecycle and may
+suspend, persist, interact with humans, call host capabilities, compose child
+tasks, and execute validated plans.
 
 This document defines the initial task semantics introduced by Agentic Kaj.
 
@@ -313,7 +316,8 @@ task Parent() -> Int {
 }
 ```
 
-A later Agentic Kaj feature defines child-task creation, task handles, waiting, cancellation propagation, and related composition semantics.
+Child-task creation, task handles, waiting, and cancellation propagation are
+defined by [Task Composition](task-composition.md).
 
 ---
 
@@ -415,7 +419,7 @@ Task IDs do not appear in source AST JSON.
 
 ## 16. Task lifecycle
 
-Agentic Checkpoint 2 expands the task lifecycle to seven states:
+The complete task lifecycle includes:
 
 ```text
 created
@@ -442,7 +446,7 @@ running
 At safe boundaries between named steps, a host may pause and later resume a running task. A host
 may also cancel a non-terminal task. Completed, failed, and cancelled tasks are terminal.
 
-See [Steps and Task Lifecycle](kaj-agentic-steps-and-lifecycle-spec.md) for the complete transition
+See [Steps and Task Lifecycle](steps-and-lifecycle.md) for the complete transition
 table and cooperative pause/cancellation semantics.
 
 ---

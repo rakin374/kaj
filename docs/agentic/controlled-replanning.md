@@ -34,11 +34,34 @@ execution continues
 
 The planner does not receive general self-modification authority.
 
+### Example: a planner-owned region
+
+```kaj
+task Investigate(topic: String) -> String {
+    goal "Investigate {topic} and return a concise finding"
+
+    invariant {
+        topic != ""
+    }
+
+    plan {
+    }
+
+    return "complete"
+}
+```
+
+The initial planner may fill `plan` with validated Kaj steps. At a later safe
+boundary, the host may request a replan. The replacement contains only the
+pending planner-owned suffix. Kaj retains completed steps, validates the base
+revision and fingerprint, validates the replacement under the existing task
+contracts and capability grants, and commits the new revision atomically.
+
 ---
 
 ## 2. Replanning versus initial planning
 
-Checkpoint 8 defines initial planning:
+Initial planning follows:
 
 ```text
 empty/unresolved plan region
@@ -46,7 +69,7 @@ empty/unresolved plan region
 planner proposes initial plan
 ```
 
-Checkpoint 9 adds:
+Controlled replanning adds:
 
 ```text
 accepted plan already exists
@@ -165,7 +188,7 @@ subject to ordinary Kaj validation.
 
 A replan may be requested by the host/runtime.
 
-Checkpoint 9 does not require automatic model-driven triggering.
+Agentic Kaj Conformance 1 does not require automatic model-driven triggering.
 
 Conceptually:
 
@@ -188,7 +211,7 @@ explicit user request
 
 ## 9. Source-level replan syntax
 
-Checkpoint 9 does not require a general source-level:
+Agentic Kaj Conformance 1 does not define a general source-level:
 
 ```text
 replan
@@ -210,7 +233,7 @@ A task awaiting a replan uses:
 waiting_for_planner
 ```
 
-from Checkpoint 8.
+from the planner interface.
 
 No separate `waiting_for_replanner` lifecycle state is introduced.
 
@@ -532,7 +555,7 @@ The planner may later use the child outcome as new context.
 
 ## 31. Failed step
 
-Checkpoint 9 does not automatically retry or replan a failed step after the task has entered terminal:
+The runtime does not automatically retry or replan a failed step after the task has entered terminal:
 
 ```text
 failed
@@ -773,7 +796,7 @@ Every revision is independently validated.
 
 ## 50. Summary
 
-Checkpoint 9 freezes:
+Agentic Kaj Conformance 1 freezes:
 
 ```text
 replanning modifies only future planner-owned work

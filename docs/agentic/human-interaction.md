@@ -297,7 +297,7 @@ handoff:
 
 ## 13. Human interaction state
 
-Checkpoint 4 adds:
+Human interaction adds:
 
 ```text
 waiting_for_human

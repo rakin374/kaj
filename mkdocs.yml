@@ -42,8 +42,8 @@ nav:
       - Imports: language/imports.md
   - Agentic Kaj:
       - Overview: agentic/index.md
-      - Tasks: agentic/kaj-agentic-tasks-spec.md
-      - Steps and Task Lifecycle: agentic/kaj-agentic-steps-and-lifecycle-spec.md
+      - Tasks: agentic/tasks.md
+      - Steps and Task Lifecycle: agentic/steps-and-lifecycle.md
       - Task Contracts: agentic/task-contracts.md
       - Human Interaction: agentic/human-interaction.md
       - Persistence and Resume: agentic/persistence-resume.md

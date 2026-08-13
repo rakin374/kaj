@@ -2,7 +2,8 @@
 
 Persistence allows Agentic Kaj tasks to survive process interruption and resume from durable runtime state.
 
-This document defines the initial semantics of persistent task state, suspension checkpoints, restart recovery, and resume behavior.
+This document defines persistent task state, suspension boundaries, restart
+recovery, and resume behavior.
 
 ---
 
@@ -10,7 +11,7 @@ This document defines the initial semantics of persistent task state, suspension
 
 Agentic Kaj tasks are durable units of work.
 
-Checkpoint 5 makes that durability real across process restart.
+Persistence makes that durability real across process restart.
 
 A task may be suspended while:
 
@@ -22,6 +23,29 @@ waiting_for_human
 and later resume without restarting from the beginning.
 
 The runtime persists enough state to reconstruct the task instance safely.
+
+### Example: resume a human wait
+
+```kaj
+task ApproveRelease(version: String) -> Bool {
+    step approval {
+        let approved = confirm("Release {version}?")
+        return approved
+    }
+
+    return false
+}
+```
+
+When `confirm` has no response, the task enters `waiting_for_human`. A durable
+snapshot includes the task identity, interaction identity, committed execution
+position, environment, and step state. After restart, the host restores the
+same task and submits a response for the same interaction. Execution continues
+after `confirm`; it does not create a second task or restart the step from an
+arbitrary point.
+
+If the process stops while a step is incomplete, that step may replay from its
+beginning. A step whose completion was durably committed is not replayed.
 
 ---
 
@@ -156,7 +180,7 @@ Future capabilities must be represented by durable capability bindings/identifie
 
 The runtime must persist where task execution should continue.
 
-Checkpoint 5 requires an explicit continuation/execution representation.
+The runtime requires an explicit continuation/execution representation.
 
 A restored task must not restart from the beginning.
 
@@ -291,7 +315,7 @@ running
 
 The runtime must not blindly assume the currently executing operation completed.
 
-Checkpoint 5 distinguishes:
+Persistence distinguishes:
 
 ```text
 last committed durable state
@@ -336,7 +360,7 @@ Capabilities later need idempotency/reconciliation semantics.
 
 ## 20. Step replay warning
 
-Checkpoint 5 provides:
+The initial persistence model provides:
 
 ```text
 at-least-once execution for an interrupted incomplete step
@@ -430,7 +454,7 @@ embedded database
 remote workflow store
 ```
 
-Checkpoint 5 reference implementation may use a simple local backend.
+The reference implementation may use a simple local backend.
 
 The durable state format must remain conceptually host-independent.
 
@@ -569,7 +593,7 @@ A restored `paused` task remains paused.
 
 ## 34. Auto-resume
 
-Checkpoint 5 does not require automatic resume after runtime startup.
+Agentic Kaj Conformance 1 does not require automatic resume after runtime startup.
 
 The host chooses which resumable tasks to resume.
 
@@ -605,7 +629,7 @@ A restarted runtime must not resurrect the task.
 
 Failure to save required durable state is a runtime failure.
 
-The runtime must not report a checkpoint as durable if persistence failed.
+The runtime must not report a boundary as durable if persistence failed.
 
 ---
 
@@ -637,7 +661,7 @@ Do not partially recover by guessing missing state.
 
 `inform` is non-blocking.
 
-Checkpoint 5 does not require replaying notifications after crash.
+The runtime does not have to replay notifications after a crash.
 
 If an `inform` occurs inside an incomplete step that is replayed, it may be emitted again.
 
@@ -677,7 +701,7 @@ The Kaj runtime must not serialize arbitrary host secrets that are not represent
 
 ## 45. Summary
 
-Checkpoint 5 freezes:
+Agentic Kaj Conformance 1 freezes:
 
 ```text
 TaskId survives restart
