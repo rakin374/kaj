@@ -77,6 +77,7 @@ class StepStatement(Statement):
 class UseCapabilityDeclaration(Statement):
     capability_name: str
     alias: str
+    capability_module: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

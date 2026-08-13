@@ -442,9 +442,15 @@ def _encode_node(node: Node) -> dict[str, JSONValue]:
             span,
         )
     if isinstance(node, UseCapabilityDeclaration):
+        payload: dict[str, object] = {
+            "capability_name": node.capability_name,
+            "alias": node.alias,
+        }
+        if node.capability_module:
+            payload["capability_module"] = list(node.capability_module)
         return _node(
             "use_capability_declaration",
-            {"capability_name": node.capability_name, "alias": node.alias},
+            payload,
             span,
         )
     if isinstance(node, PlanRegion):
@@ -1006,10 +1012,19 @@ def _decode_step(obj: dict[str, object], path: JSONPath) -> Node:
 
 def _decode_use_capability(obj: dict[str, object], path: JSONPath) -> Node:
     _check_node_fields(obj, {"capability_name", "alias"}, path)
+    module_field = obj.get("capability_module")
+    capability_module: tuple[str, ...] = ()
+    if module_field is not None:
+        if not isinstance(module_field, list) or not all(
+            isinstance(item, str) for item in module_field
+        ):
+            raise ValueError(f"{path}.capability_module must be a string array")
+        capability_module = tuple(module_field)
     return UseCapabilityDeclaration(
         span=_span_field(obj, path),
         capability_name=_string_field(obj, "capability_name", path),
         alias=_string_field(obj, "alias", path),
+        capability_module=capability_module,
     )
 
 

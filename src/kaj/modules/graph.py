@@ -5,6 +5,7 @@ from pathlib import Path
 
 from kaj.ast import (
     BindingDeclaration,
+    CapabilityDeclaration,
     FunctionDeclaration,
     ImportDeclaration,
     Program,
@@ -12,6 +13,7 @@ from kaj.ast import (
 )
 from kaj.diagnostics import Diagnostic
 from kaj.modules.names import ModuleName
+from kaj.modules.stdlib import resolve_stdlib_module
 from kaj.pipeline import parse_source
 from kaj.semantic import (
     ModuleType,
@@ -144,12 +146,16 @@ def compile_module_graph(entry_path: Path, source: str) -> ModuleGraphResult:
             dependency = loaded_by_name.get(name.dotted)
             if dependency is None:
                 if not candidate.is_file():
+                    std_candidate = resolve_stdlib_module(name)
+                    if std_candidate is not None:
+                        candidate = std_candidate
+                if not candidate.is_file():
                     diagnostics.append(
                         ModuleDiagnostic(
                             module.path,
                             Diagnostic(
                                 "IMPORT_NOT_FOUND",
-                                f"Local module '{name.dotted}' was not found at {candidate}.",
+                                f"Module '{name.dotted}' was not found.",
                                 declaration.span,
                             ),
                         )
@@ -197,10 +203,12 @@ def compile_module_graph(entry_path: Path, source: str) -> ModuleGraphResult:
         resolver = Resolver(include_builtins=True)
         resolution = resolver.resolve(module.program)
         imported_by_id = {id(declaration): namespace for declaration, namespace in imported}
+        module_name = "<entry>" if module.name is None else module.name.dotted
         checker = TypeChecker(
             resolution,
             imported_modules=imported_by_id,
             type_id_base=(index + 1) * 1_000_000,
+            module_name=module_name,
         )
         types = checker.check(module.program)
         diagnostics.extend(
@@ -227,7 +235,9 @@ def _exports(
 ) -> ModuleType:
     values: list[tuple[str, SemanticType]] = []
     for statement in module.program.statements:
-        if isinstance(statement, (FunctionDeclaration, TaskDeclaration, BindingDeclaration)):
+        if isinstance(
+            statement, (FunctionDeclaration, TaskDeclaration, BindingDeclaration, CapabilityDeclaration)
+        ):
             symbol = resolution.symbol_for_declaration(statement)
             semantic_type = None if symbol is None else types.type_of_symbol(symbol)
             if semantic_type is not None:

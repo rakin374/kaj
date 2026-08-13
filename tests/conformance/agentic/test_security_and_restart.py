@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from kaj.ast import PlanRegion, TaskDeclaration
+from kaj.capabilities import CapabilityIdentity
 from kaj.pipeline import compile_source, parse_source
 from kaj.runtime import (
     CapabilityAdapter,
@@ -40,7 +41,14 @@ class PendingPlanner(PlannerAdapter):
         return PlannerAdapterResult.pending_result()
 
 
+LOCAL_COUNTER = CapabilityIdentity("<entry>", "Counter", 1)
+
+
 class PendingCounter(CapabilityAdapter):
+    @property
+    def capability_identity(self) -> CapabilityIdentity:
+        return LOCAL_COUNTER
+
     @property
     def capability_type(self) -> str:
         return "Counter"
@@ -49,6 +57,10 @@ class PendingCounter(CapabilityAdapter):
     def host_binding_id(self) -> str:
         return "counter-restart"
 
+    @property
+    def supported_operations(self) -> frozenset[str]:
+        return frozenset({"read"})
+
     def invoke(self, request_id, operation, arguments):  # type: ignore[no-untyped-def]
         del request_id, operation, arguments
         return CapabilityAdapterResult.pending()
@@ -56,12 +68,20 @@ class PendingCounter(CapabilityAdapter):
 
 class NativeLeak(CapabilityAdapter):
     @property
+    def capability_identity(self) -> CapabilityIdentity:
+        return LOCAL_COUNTER
+
+    @property
     def capability_type(self) -> str:
         return "Counter"
 
     @property
     def host_binding_id(self) -> str:
         return "native-leak"
+
+    @property
+    def supported_operations(self) -> frozenset[str]:
+        return frozenset({"read"})
 
     def invoke(self, request_id, operation, arguments):  # type: ignore[no-untyped-def]
         del request_id, operation, arguments

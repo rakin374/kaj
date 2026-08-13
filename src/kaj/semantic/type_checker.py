@@ -66,6 +66,7 @@ from kaj.ast import (
 from kaj.diagnostics import Diagnostic
 from kaj.semantic.resolver import ResolutionResult
 from kaj.semantic.symbols import Symbol, SymbolKind
+from kaj.capabilities import CapabilityIdentity
 from kaj.semantic.types import (
     PRIMITIVE_TYPES_BY_NAME,
     BuiltinFunctionType,
@@ -223,6 +224,7 @@ class TypeChecker:
         *,
         imported_modules: dict[int, ModuleType] | None = None,
         type_id_base: int = 0,
+        module_name: str = "<entry>",
     ) -> None:
         self._resolution = resolution
         self._expression_types: dict[int, TypedExpression] = {}
@@ -253,6 +255,7 @@ class TypeChecker:
         self._capability_types_by_name: dict[str, CapabilityType] = {}
         self._imported_modules = {} if imported_modules is None else imported_modules
         self._type_id_base = type_id_base
+        self._module_name = module_name
 
     def check(self, program: Program) -> TypeCheckResult:
         self._expression_types = {}
@@ -369,11 +372,46 @@ class TypeChecker:
                         self._resolve_annotation(operation.return_type),
                     )
                 )
-            capability_type = CapabilityType(declaration.name, tuple(operations))
+            capability_type = CapabilityType(
+                CapabilityIdentity(self._module_name, declaration.name, 1),
+                declaration.name,
+                tuple(operations),
+            )
             self._capability_types_by_name[declaration.name] = capability_type
             symbol = self._resolution.symbol_for_declaration(declaration)
             if symbol is not None:
                 self._record_symbol(symbol, capability_type)
+
+    def _resolve_capability_requirement(
+        self, statement: UseCapabilityDeclaration
+    ) -> CapabilityType | None:
+        if statement.capability_module:
+            module = self._module_by_dotted_name(".".join(statement.capability_module))
+            if module is None:
+                return None
+            for export_name, export_type in module.values:
+                if export_name == statement.capability_name and isinstance(
+                    export_type, CapabilityType
+                ):
+                    return export_type
+            return None
+        return self._capability_types_by_name.get(statement.capability_name)
+
+    def _module_by_dotted_name(self, dotted: str) -> ModuleType | None:
+        for module in self._imported_modules.values():
+            found = self._find_module_by_name(module, dotted)
+            if found is not None:
+                return found
+        return None
+
+    def _find_module_by_name(self, module: ModuleType, dotted: str) -> ModuleType | None:
+        if module.name == dotted:
+            return module
+        for _, child in module.modules:
+            found = self._find_module_by_name(child, dotted)
+            if found is not None:
+                return found
+        return None
 
     def _module_record_definitions(self, module: ModuleType) -> tuple[RecordDefinition, ...]:
         return module.records + tuple(
@@ -789,11 +827,16 @@ class TypeChecker:
         ):
             return
         elif isinstance(statement, UseCapabilityDeclaration):
-            capability_type = self._capability_types_by_name.get(statement.capability_name)
+            capability_type = self._resolve_capability_requirement(statement)
             if capability_type is None:
+                qualified = (
+                    ".".join(statement.capability_module + (statement.capability_name,))
+                    if statement.capability_module
+                    else statement.capability_name
+                )
                 self._diagnose(
                     "CAPABILITY_UNKNOWN_TYPE",
-                    f"Unknown capability type '{statement.capability_name}'.",
+                    f"Unknown capability type '{qualified}'.",
                     statement.span,
                 )
                 return

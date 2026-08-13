@@ -25,11 +25,15 @@ from kaj.ast import (
 )
 from kaj.formatting import format_program
 from kaj.pipeline import compile_source
+from kaj.capabilities import CapabilityIdentity, HostBindingId
 from kaj.runtime.capabilities import (
     CapabilityAdapter,
     CapabilityBindingDescriptor,
     CapabilityRegistry,
+    CapabilityRegistryError,
     CapabilityRequestId,
+    decode_binding_descriptor,
+    encode_binding_descriptor,
 )
 from kaj.runtime.environment import RuntimeSlot
 from kaj.runtime.errors import RuntimeErrorInfo, RuntimeFailure
@@ -516,11 +520,6 @@ class TaskRuntime:
             raise TaskStartError(
                 "CAPABILITY_UNKNOWN_ALIAS", f"Task has no capability alias '{alias}'."
             )
-        if adapter.capability_type != declaration.capability_name:
-            raise TaskStartError(
-                "CAPABILITY_BINDING_MISMATCH",
-                f"Adapter type '{adapter.capability_type}' cannot bind '{declaration.capability_name}'.",
-            )
         capability_symbol = self._resolution.symbol_for_declaration(declaration)
         capability_type = (
             None if capability_symbol is None else self._types.type_of_symbol(capability_symbol)
@@ -528,6 +527,12 @@ class TaskRuntime:
         if not isinstance(capability_type, CapabilityType):
             raise TaskStartError(
                 "CAPABILITY_UNKNOWN_TYPE", "Capability requirement has no static type."
+            )
+        if not adapter.capability_identity.is_compatible_with(capability_type.identity):
+            raise TaskStartError(
+                "CAPABILITY_VERSION_MISMATCH",
+                f"Adapter identity '{adapter.capability_identity.canonical}' cannot bind "
+                f"'{capability_type.identity.canonical}'.",
             )
         declared = frozenset(item.name for item in capability_type.operations)
         grants = declared if granted_operations is None else frozenset(granted_operations)
@@ -537,12 +542,15 @@ class TaskRuntime:
                 "Capability grant contains an undeclared operation.",
             )
         descriptor = CapabilityBindingDescriptor(
-            declaration.capability_name,
+            capability_type.identity,
             alias,
-            adapter.host_binding_id,
+            HostBindingId(adapter.host_binding_id),
             grants,
         )
-        self._capability_registry.bind(str(instance.id), descriptor, adapter)
+        try:
+            self._capability_registry.bind_task(str(instance.id), descriptor, adapter)
+        except CapabilityRegistryError as error:
+            raise TaskStartError(error.code, error.message) from None
         instance.capability_bindings[alias] = descriptor
         self._save_snapshot(instance)
         return descriptor
@@ -1432,15 +1440,7 @@ class TaskRuntime:
                 "expression_key": Interpreter.interaction_key(request.expression),
             }
         capability_bindings: tuple[dict[str, JSONValue], ...] = tuple(
-            cast(
-                dict[str, JSONValue],
-                {
-                    "capability_type": descriptor.capability_type,
-                    "alias": descriptor.alias,
-                    "host_binding_id": descriptor.host_binding_id,
-                    "granted_operations": sorted(descriptor.granted_operations),
-                },
-            )
+            cast(dict[str, JSONValue], encode_binding_descriptor(descriptor))
             for _, descriptor in sorted(instance.capability_bindings.items())
         )
         capability_history: list[dict[str, JSONValue]] = []
@@ -1606,16 +1606,8 @@ class TaskRuntime:
                         step.state = StepState.PENDING
             binding_descriptors: dict[str, CapabilityBindingDescriptor] = {}
             for data in snapshot.capability_bindings:
-                descriptor = CapabilityBindingDescriptor(
-                    str(data.get("capability_type")),
-                    str(data.get("alias")),
-                    str(data.get("host_binding_id")),
-                    frozenset(
-                        str(item)
-                        for item in cast(list[JSONValue], data.get("granted_operations", []))
-                    ),
-                )
-                if self._capability_registry.rebind(snapshot.task_id, descriptor) is None:
+                descriptor = decode_binding_descriptor(cast(dict[str, JSONValue], data))
+                if self._capability_registry.rebind_task(snapshot.task_id, descriptor) is None:
                     raise TaskPersistenceError(
                         "CAPABILITY_REBIND_FAILED",
                         f"Capability '{descriptor.alias}' could not be rebound.",

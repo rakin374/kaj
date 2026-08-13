@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from kaj.capabilities import CapabilityIdentity
 from kaj.formatting import format_program
 from kaj.pipeline import compile_source, parse_source
 from kaj.runtime import (
@@ -45,6 +46,9 @@ def compiled(source: str = SOURCE):  # type: ignore[no-untyped-def]
     return result
 
 
+LOCAL_COUNTER_IDENTITY = CapabilityIdentity("<entry>", "Counter", 1)
+
+
 class MockCounter(CapabilityAdapter):
     def __init__(self, binding_id: str = "counter-1", *, asynchronous: bool = False) -> None:
         self._binding_id = binding_id
@@ -53,12 +57,20 @@ class MockCounter(CapabilityAdapter):
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     @property
+    def capability_identity(self) -> CapabilityIdentity:
+        return LOCAL_COUNTER_IDENTITY
+
+    @property
     def capability_type(self) -> str:
         return "Counter"
 
     @property
     def host_binding_id(self) -> str:
         return self._binding_id
+
+    @property
+    def supported_operations(self) -> frozenset[str]:
+        return frozenset({"read", "add"})
 
     def invoke(
         self,
@@ -215,6 +227,7 @@ task Count() -> Int { use Counter as counter return counter.add(1) }
     assert original is not None
     snapshot = store.load(str(instance.id))
     assert snapshot.capability_bindings[0]["host_binding_id"] == "counter-1"
+    assert snapshot.capability_bindings[0]["capability_identity"]["module"] == "<entry>"
     assert snapshot.pending_capability_request["id"] == str(original.id)  # type: ignore[index]
 
     second = runtime_for(source, store=store, registry=registry)

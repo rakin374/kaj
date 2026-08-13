@@ -4,6 +4,7 @@ from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from kaj.capabilities import CapabilityIdentity
 from kaj.pipeline import compile_source
 from kaj.runtime import (
     BufferOutput,
@@ -24,12 +25,27 @@ class DeterministicCapability(CapabilityAdapter):
     """Queue-backed capability adapter with no external services or native leaks."""
 
     def __init__(
-        self, capability_type: str, binding_id: str, results: Iterable[RuntimeValue]
+        self,
+        capability_type: str,
+        binding_id: str,
+        results: Iterable[RuntimeValue],
+        *,
+        module_name: str = "<entry>",
+        major_version: int = 1,
+        supported_operations: frozenset[str] | None = None,
     ) -> None:
         self._capability_type = capability_type
         self._binding_id = binding_id
+        self._identity = CapabilityIdentity(module_name, capability_type, major_version)
         self.results = deque(results)
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+        self._supported_operations = (
+            frozenset({"read"}) if supported_operations is None else supported_operations
+        )
+
+    @property
+    def capability_identity(self) -> CapabilityIdentity:
+        return self._identity
 
     @property
     def capability_type(self) -> str:
@@ -38,6 +54,10 @@ class DeterministicCapability(CapabilityAdapter):
     @property
     def host_binding_id(self) -> str:
         return self._binding_id
+
+    @property
+    def supported_operations(self) -> frozenset[str]:
+        return self._supported_operations
 
     def invoke(self, request_id, operation, arguments):  # type: ignore[no-untyped-def]
         del request_id

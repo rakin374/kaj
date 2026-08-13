@@ -1,0 +1,6 @@
+newtype CounterId = String
+
+capability Counter {
+    fn read() -> Int
+    fn add(amount: Int) -> Int
+}

@@ -167,8 +167,12 @@ class CapabilityOperationType:
     return_type: ValueType
 
 
+from kaj.capabilities import CapabilityIdentity
+
+
 @dataclass(frozen=True)
 class CapabilityType:
+    identity: CapabilityIdentity
     name: str
     operations: tuple[CapabilityOperationType, ...]
 

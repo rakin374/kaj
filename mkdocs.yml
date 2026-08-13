@@ -52,6 +52,9 @@ nav:
       - Planner Interface: agentic/planner-interface.md
       - Controlled Replanning: agentic/controlled-replanning.md
       - Agentic Conformance: agentic/agentic-conformance.md
+  - Integrations:
+      - Overview: integrations/index.md
+      - Standard Capabilities: integrations/standard-capabilities.md
   - Compiler:
       - AST JSON: compiler/ast-json.md
   - Internals:

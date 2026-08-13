@@ -460,19 +460,33 @@ class Parser:
         )
 
     def _parse_use_capability(self, start: Token) -> UseCapabilityDeclaration:
-        capability = self._consume(
+        parts: list[str] = []
+        first = self._consume(
             TokenKind.IDENTIFIER,
             PARSE_EXPECTED_IDENTIFIER,
             "Expected a capability type name.",
         )
+        parts.append(first.lexeme)
+        while self._match(TokenKind.DOT):
+            segment = self._consume(
+                TokenKind.IDENTIFIER,
+                PARSE_EXPECTED_IDENTIFIER,
+                "Expected a capability module segment.",
+            )
+            parts.append(segment.lexeme)
         self._consume(TokenKind.AS, PARSE_EXPECTED_TOKEN, "Expected 'as'.")
         alias = self._consume(
             TokenKind.IDENTIFIER,
             PARSE_EXPECTED_IDENTIFIER,
             "Expected a capability alias.",
         )
+        capability_module = tuple(parts[:-1])
+        capability_name = parts[-1]
         return UseCapabilityDeclaration(
-            SourceSpan(start.span.start, alias.span.end), capability.lexeme, alias.lexeme
+            SourceSpan(start.span.start, alias.span.end),
+            capability_name,
+            alias.lexeme,
+            capability_module,
         )
 
     def _parse_contract_clause(
@@ -1439,11 +1453,18 @@ class Parser:
     def _check_contextual(self, lexeme: str) -> bool:
         matches = self._current().kind is TokenKind.IDENTIFIER and self._current().lexeme == lexeme
         if lexeme == "use":
-            return (
-                matches
-                and self._peek_token(1).kind is TokenKind.IDENTIFIER
-                and self._peek_token(2).kind is TokenKind.AS
-            )
+            if not matches:
+                return False
+            index = 1
+            if self._peek_token(index).kind is not TokenKind.IDENTIFIER:
+                return False
+            index += 1
+            while self._peek_token(index).kind is TokenKind.DOT:
+                index += 1
+                if self._peek_token(index).kind is not TokenKind.IDENTIFIER:
+                    return False
+                index += 1
+            return self._peek_token(index).kind is TokenKind.AS
         return matches
 
     def _advance(self) -> Token:

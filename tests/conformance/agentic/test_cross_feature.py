@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from kaj.ast import PlanRegion, TaskDeclaration
+from kaj.capabilities import CapabilityIdentity
 from kaj.pipeline import compile_source, parse_source
 from kaj.runtime import (
     CapabilityAdapter,
@@ -31,7 +32,14 @@ def proposal(source: str) -> PlannerProposal:
     return PlannerProposal(region.body)
 
 
+LOCAL_COUNTER = CapabilityIdentity("<entry>", "Counter", 1)
+
+
 class PendingCapability(CapabilityAdapter):
+    @property
+    def capability_identity(self) -> CapabilityIdentity:
+        return LOCAL_COUNTER
+
     @property
     def capability_type(self) -> str:
         return "Counter"
@@ -39,6 +47,10 @@ class PendingCapability(CapabilityAdapter):
     @property
     def host_binding_id(self) -> str:
         return "counter-conformance"
+
+    @property
+    def supported_operations(self) -> frozenset[str]:
+        return frozenset({"read"})
 
     def invoke(self, request_id, operation, arguments):  # type: ignore[no-untyped-def]
         del request_id, operation, arguments

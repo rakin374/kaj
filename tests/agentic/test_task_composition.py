@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from kaj.capabilities import CapabilityIdentity
 from kaj.formatting import format_program
-from kaj.pipeline import compile_source, parse_source
+from kaj.pipeline import compile_source, parse_source, parse_source
 from kaj.runtime import (
     CapabilityAdapter,
     CapabilityAdapterResult,
@@ -181,6 +182,10 @@ task C() -> Int { return ask<Int>("x") }
 
 class ChildAdapter(CapabilityAdapter):
     @property
+    def capability_identity(self) -> CapabilityIdentity:
+        return CapabilityIdentity("<entry>", "Counter", 1)
+
+    @property
     def capability_type(self) -> str:
         return "Counter"
 
@@ -188,12 +193,17 @@ class ChildAdapter(CapabilityAdapter):
     def host_binding_id(self) -> str:
         return "child-counter"
 
+    @property
+    def supported_operations(self) -> frozenset[str]:
+        return frozenset({"read"})
+
     def invoke(
         self,
         request_id: CapabilityRequestId,
         operation: str,
         arguments: tuple[RuntimeValue, ...],
     ) -> CapabilityAdapterResult:
+        del request_id, operation, arguments
         return CapabilityAdapterResult.immediate(42)
 
 

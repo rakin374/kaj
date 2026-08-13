@@ -1,10 +1,15 @@
+from kaj.capabilities import CapabilityIdentity, HostBindingId
 from kaj.runtime.capabilities import (
     CapabilityAdapter,
     CapabilityAdapterResult,
     CapabilityBinding,
     CapabilityBindingDescriptor,
     CapabilityRegistry,
+    CapabilityRegistryError,
     CapabilityRequestId,
+    TaskCapabilityBindings,
+    decode_binding_descriptor,
+    encode_binding_descriptor,
 )
 from kaj.runtime.environment import Environment, RuntimeSlot
 from kaj.runtime.errors import RuntimeErrorInfo
@@ -77,10 +82,14 @@ __all__ = [
     "CapabilityAdapterResult",
     "CapabilityBinding",
     "CapabilityBindingDescriptor",
+    "CapabilityIdentity",
     "CapabilityRegistry",
+    "CapabilityRegistryError",
     "CapabilityRequest",
     "CapabilityRequestId",
     "CapabilityRequestStatus",
+    "HostBindingId",
+    "TaskCapabilityBindings",
     "ContractFailure",
     "ContractFailureKind",
     "Environment",
@@ -130,6 +139,8 @@ __all__ = [
     "TaskStartError",
     "TaskState",
     "TaskStore",
+    "decode_binding_descriptor",
     "decode_utf8",
+    "encode_binding_descriptor",
     "task_definition_fingerprint",
 ]

@@ -165,7 +165,12 @@ class _Formatter:
         if isinstance(statement, StepStatement):
             return self.header_block(f"step {statement.name}", statement.body, depth)
         if isinstance(statement, UseCapabilityDeclaration):
-            return [prefix + f"use {statement.capability_name} as {statement.alias}"]
+            qualified = (
+                ".".join(statement.capability_module + (statement.capability_name,))
+                if statement.capability_module
+                else statement.capability_name
+            )
+            return [prefix + f"use {qualified} as {statement.alias}"]
         if isinstance(statement, PlanRegion):
             return self.header_block("plan", statement.body, depth)
         if isinstance(statement, GoalClause):
