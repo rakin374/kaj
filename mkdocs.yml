@@ -55,6 +55,7 @@ nav:
   - Integrations:
       - Overview: integrations/index.md
       - Standard Capabilities: integrations/standard-capabilities.md
+      - Browser Reference Adapter: integrations/browser-reference-adapter.md
   - Standard Capabilities:
       - Browser: capabilities/browser.md
   - Compiler:
